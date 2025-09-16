@@ -8,15 +8,22 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from make_triplets import main_generate_triplets_hardcoded
 from HRR_pytorch import projection, binding, unbinding
+from typing import Any
+import torch
+import torch.nn.functional as F
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')   # dim 384
 # Note- Maybe we should use word2vec and check with that as well. for phrases, just average the word2vec embeddings
 
-# using hardcoded values, to be refactored 
+# using hardcoded values from make_triplets.py, to be refactored 
 
 # get embeddings for triplets
-def triplet2embeddings():
-    all_triplets = main_generate_triplets_hardcoded()
+all_triplets = main_generate_triplets_hardcoded()
+
+def triplet2embeddings(all_triplets: list[list[list[Any]]]):
     all_triplets_embed = []
     for chunk_triplets in all_triplets:
         chunk_triplets_embed = []
@@ -29,11 +36,15 @@ def triplet2embeddings():
     return all_triplets_embed
 
 # Apply HRR
-def embedding2hrr(all_triplets_embeddings):
+def embedding2hrr(all_triplets_embeddings: list[list[list[Any]]]):
     all_hrr_bound_vectors = []
     for chunk_embeds in all_triplets_embeddings:
         chunk_bound_vectors = []
         for x_e, R_e, y_e in chunk_embeds:
+            x_e = torch.from_numpy(x_e).float().to(device)
+            R_e = torch.from_numpy(R_e).float().to(device)
+            y_e = torch.from_numpy(y_e).float().to(device)
+
             x_hrr = projection(x_e, dim=-1)
             R_hrr = projection(R_e, dim=-1)
             y_hrr = projection(y_e, dim=-1)
@@ -43,4 +54,3 @@ def embedding2hrr(all_triplets_embeddings):
             chunk_bound_vectors.append(b2)
         all_hrr_bound_vectors.append(chunk_bound_vectors)
     return all_hrr_bound_vectors
-
