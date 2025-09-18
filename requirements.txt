@@ -9,7 +9,7 @@ confection==0.1.5
 cymem==2.0.11
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
 filelock==3.19.1
-fsspec==2025.9.0
+fsspec==2025.3.0
 hf-xet==1.1.9
 hnswlib==0.8.0
 huggingface-hub==0.34.4
