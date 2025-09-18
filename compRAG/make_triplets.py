@@ -166,7 +166,7 @@ def clean_triplets(triplets):
 
 
 def main_generate_triplets_hardcoded():
-    texts = [text, text1, text2, text4]
+    texts = [text, text1, text2, text3, text4]
     out = []
     
     for i, t in enumerate(texts, 1):
@@ -176,7 +176,12 @@ def main_generate_triplets_hardcoded():
         out.append(cleaned_triplets)
     
     return out
-    
+
+
+def main_generate_triplets(nlp, text:str)-> list[tuple[str, str, str]]:
+    doc = nlp(text)
+    triplets = extract_triplets(doc)
+    return clean_triplets(triplets)
 
 if __name__ == "__main__":
     texts = [text, text1, text2, text4, text5, text6]
@@ -192,3 +197,4 @@ if __name__ == "__main__":
         
         for triplet in cleaned_triplets:
             print(f"  {triplet}")
+
