@@ -23,22 +23,21 @@ embedding_model = SentenceTransformer('all-MiniLM-L6-v2')   # dim 384
 # get embeddings for triplets
 all_triplets = main_generate_triplets_hardcoded()
 
-def triplet2embeddings(all_triplets: list[list[list[Any]]]):
-    all_triplets_embed = []
-    for chunk_triplets in all_triplets:
+def doc_triplets2embeddings(doc_triplets: list[list[tuple[str, str, str]]]):
+    doc_triplets_embed = []
+    for chunk_triplets in doc_triplets:
         chunk_triplets_embed = []
         for x,R,y in chunk_triplets:
             embed_x = embedding_model.encode([x])[0]
             embed_R = embedding_model.encode([R])[0]
             embed_y = embedding_model.encode([y])[0]
             chunk_triplets_embed.append([embed_x, embed_R, embed_y])
-        all_triplets_embed.append(chunk_triplets_embed)
-    return all_triplets_embed
+        doc_triplets_embed.append(chunk_triplets_embed)
+    return doc_triplets_embed
 
-# Apply HRR
-def embedding2hrr(all_triplets_embeddings: list[list[list[Any]]]):
-    all_hrr_bound_vectors = []
-    for chunk_embeds in all_triplets_embeddings:
+def doc_embeddings2hrr(doc_triplet_embeddings: list[list[list[Any]]]):
+    doc_hrr_vectors = []
+    for chunk_embeds in doc_triplet_embeddings:
         chunk_bound_vectors = []
         for x_e, R_e, y_e in chunk_embeds:
             x_e = torch.from_numpy(x_e).float().to(device)
@@ -52,5 +51,31 @@ def embedding2hrr(all_triplets_embeddings: list[list[list[Any]]]):
             b1 = binding(x_hrr, R_hrr, dim=-1)
             b2 = binding(b1, y_hrr, dim=-1)
             chunk_bound_vectors.append(b2)
-        all_hrr_bound_vectors.append(chunk_bound_vectors)
-    return all_hrr_bound_vectors
+        doc_hrr_vectors.append(chunk_bound_vectors)
+    return doc_hrr_vectors
+
+def chunk_triplets2embeddings(chunk_triplets: list[tuple[str, str, str]]):
+    chunk_triplets_embed = []
+    for x,R,y in chunk_triplets:
+        embed_x = embedding_model.encode([x])[0]
+        embed_R = embedding_model.encode([R])[0]
+        embed_y = embedding_model.encode([y])[0]
+        chunk_triplets_embed.append([embed_x, embed_R, embed_y])
+    chunk_triplets_embed.append(chunk_triplets_embed)
+    return chunk_triplets_embed
+
+def chunk_embeddings2hrr(chunk_triplet_embeddings: list[list[Any]]):
+    chunk_hrr_vectors = []
+    for x_e, R_e, y_e in chunk_triplet_embeddings:
+        x_e = torch.from_numpy(x_e).float().to(device)
+        R_e = torch.from_numpy(R_e).float().to(device)
+        y_e = torch.from_numpy(y_e).float().to(device)
+
+        x_hrr = projection(x_e, dim=-1)
+        R_hrr = projection(R_e, dim=-1)
+        y_hrr = projection(y_e, dim=-1)
+
+        b1 = binding(x_hrr, R_hrr, dim=-1)
+        b2 = binding(b1, y_hrr, dim=-1)
+        chunk_hrr_vectors.append(b2)
+    return chunk_hrr_vectors
