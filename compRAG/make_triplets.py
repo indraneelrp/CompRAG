@@ -51,9 +51,7 @@ Not everyone thought this idea was going to rock the world, including Uszkoreit�
 '''
 
 text6 ='''
-Uszkoreit persuaded a few colleagues to conduct experiments on self-attention. Their work showed promise, and in 2016 they published a paper about it. Uszkoreit wanted to push their research further—the team’s experiments used only tiny bits of text—but none of his collaborators were interested. Instead, like gamblers who leave the casino with modest winnings, they went off to apply the lessons they had learned. “The thing *worked*,” he says. “The folks on that paper got excited about reaping the rewards and deploying it in a variety of different places at Google, including search and, eventually, ads. It was an amazing success in many ways, but I didn’t want to leave it there.”
-
-Uszkoreit felt that self-attention could take on much bigger tasks. *There’s another way to do this*, he’d argue to anyone who would listen, and some who wouldn’t, outlining his vision on whiteboards in Building 1945, named after its address on Charleston Road on the northern edge of the Google campus.
+Anarchism is a political philosophy that advocates self-governed societies based on voluntary institutions. These are often described as stateless societies, although several authors have defined them more specifically as institutions based on non-hierarchical free associations. Anarchism holds the state to be undesirable, unnecessary and harmful
 '''
 
 def get_full_phrase(token, direction="both"):
@@ -92,14 +90,24 @@ def find_subjects(verb):
     
     return subjects
 
+
 def find_objects(verb):
     """Find all objects for a given verb."""
     objects = []
     
     for token in verb.rights:
-        if token.dep_ in ("dobj", "attr", "pcomp"):
+        if token.dep_ in ("dobj", "attr", "pcomp", "acomp"):
             objects.append(get_full_phrase(token))
-        elif token.dep_ == "prep":  # Prepositional objects
+        elif token.dep_ == "xcomp":  # open clausal complement (like "to be undesirable")
+            # look for the actual predicate in the xcomp
+            for xcomp_child in token.subtree:
+                if xcomp_child.dep_ in ("attr", "acomp") or (xcomp_child.pos_ == "ADJ"):
+                    objects.append(get_full_phrase(xcomp_child))
+        elif token.dep_ == "ccomp":  # clausal complement
+            for ccomp_child in token.subtree:
+                if ccomp_child.dep_ in ("attr", "acomp", "dobj") or (ccomp_child.pos_ == "ADJ"):
+                    objects.append(get_full_phrase(ccomp_child))
+        elif token.dep_ == "prep":
             for prep_child in token.children:
                 if prep_child.dep_ == "pobj":
                     objects.append(get_full_phrase(prep_child))
