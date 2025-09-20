@@ -54,25 +54,40 @@ text6 ='''
 Anarchism is a political philosophy that advocates self-governed societies based on voluntary institutions. These are often described as stateless societies, although several authors have defined them more specifically as institutions based on non-hierarchical free associations. Anarchism holds the state to be undesirable, unnecessary and harmful
 '''
 
-def get_full_phrase(token, direction="both"):
+def get_full_phrase(token, direction="both", max_depth=3):
     """Extract full noun phrases by following compound and modifier relationships."""
-    tokens = [token]
+    if max_depth <= 0:
+        return token.text
+        
+    tokens = []
     
     if direction in ["left", "both"]:
-        # Add left modifiers (adjectives, compounds, etc.)
+        # Collect left modifiers in order
+        left_modifiers = []
         for left_token in token.lefts:
-            if left_token.dep_ in ("compound", "amod", "det", "poss"):
-                tokens.insert(0, left_token)
+            if left_token.dep_ in ("compound", "amod", "det", "poss", "nummod", "advmod"):
+                left_modifiers.append(left_token)
+        # Sort by position in sentence to maintain word order
+        left_modifiers.sort(key=lambda x: x.i)
+        tokens.extend(left_modifiers)
+    
+    # Add the head token
+    tokens.append(token)
     
     if direction in ["right", "both"]:
-        # Add right modifiers
+        # Collect right modifiers in order
+        right_modifiers = []
         for right_token in token.rights:
-            if right_token.dep_ in ("compound", "amod"):
-                tokens.append(right_token)
-    
+            if right_token.dep_ in ("compound", "amod", "nummod", "advmod"):
+                right_modifiers.append(right_token)
+        # Sort by position in sentence to maintain word order
+        right_modifiers.sort(key=lambda x: x.i)
+        tokens.extend(right_modifiers)
+
     return " ".join([t.text for t in tokens])
 
-def find_subjects(verb):
+
+def find_subjects(verb, sent_root=None):
     """Find all subjects for a given verb."""
     subjects = []
     
@@ -86,6 +101,12 @@ def find_subjects(verb):
     if not subjects and verb.head != verb:
         for token in verb.head.lefts:
             if token.dep_ in ("nsubj", "nsubjpass"):
+                subjects.append(get_full_phrase(token))
+
+    # For questions, look for subjects in the entire sentence
+    if not subjects and sent_root:
+        for token in sent_root.subtree:
+            if token.dep_ in ("nsubj", "nsubjpass") and token.head.pos_ == "VERB":
                 subjects.append(get_full_phrase(token))
     
     return subjects
@@ -111,14 +132,85 @@ def find_objects(verb):
             for prep_child in token.children:
                 if prep_child.dep_ == "pobj":
                     objects.append(get_full_phrase(prep_child))
+        elif token.dep_ == "advmod" and token.pos_ == "ADV":
+            objects.append(token.text)
     
     return objects
+
+
+def extract_dependency_triplets(sent):
+    """Extract triplets based on dependency relationships regardless of POS."""
+    triplets = []
+    
+    for token in sent:
+        # Skip punctuation and some function words
+        if token.is_punct or token.is_space:
+            continue
+            
+        # Look for meaningful dependency relationships
+        for child in token.children:
+            if child.dep_ in ("nsubj", "nsubjpass"):
+                # Subject relationship
+                subject = get_full_phrase(child)
+                predicate = get_full_phrase(token)
+                
+                # Find objects of the predicate
+                for obj_child in token.children:
+                    if obj_child.dep_ in ("dobj", "attr", "pcomp", "advmod"):
+                        obj = get_full_phrase(obj_child)
+                        if subject.strip() and obj.strip():
+                            triplets.append((subject.strip(), token.lemma_, obj.strip()))
+    
+    return triplets
+
+
+def extract_question_triplets(sent):
+    """Extract triplets specifically from question sentences."""
+    triplets = []
+    
+    # Find the main verb in the question
+    main_verbs = [token for token in sent if token.pos_ == "VERB" and not token.is_stop]
+    
+    for verb in main_verbs:
+        subjects = find_subjects(verb, sent.root)
+        
+        # For questions, also look for objects in the broader sentence context
+        objects = find_objects(verb)
+        
+        # Look for prepositional phrases that might contain important information
+        for token in sent:
+            if token.dep_ == "prep" and token.head == verb:
+                for child in token.children:
+                    if child.dep_ == "pobj":
+                        prep_phrase = f"{token.text} {get_full_phrase(child)}"
+                        objects.append(prep_phrase)
+        
+        # Create triplets
+        for subj in subjects:
+            for obj in objects:
+                if subj.strip() and obj.strip():
+                    relation = verb.lemma_
+                    triplets.append((subj.strip(), relation, obj.strip()))
+    
+    return triplets
+
 
 def extract_triplets(doc):
     """Extract subject-relation-object triplets from spaCy doc."""
     triplets = []
     
     for sent in doc.sents:
+        is_question = any(token.text in ["what", "who", "where", "when", "why", "how", "which"] 
+                         for token in sent[:3]) or sent.text.strip().endswith("?")
+        
+        if is_question:
+            # Use specialized question handling
+            question_triplets = extract_question_triplets(sent)
+            triplets.extend(question_triplets)
+
+        dep_triplets = extract_dependency_triplets(sent)
+        triplets.extend(dep_triplets)
+
         for token in sent:
             # Look for verbs as potential relations
             if token.pos_ == "VERB" and not token.is_stop:
@@ -144,6 +236,7 @@ def extract_triplets(doc):
     
     return triplets
 
+
 def clean_triplets(triplets):
     """Remove duplicate and low-quality triplets."""
     cleaned = []
@@ -151,7 +244,7 @@ def clean_triplets(triplets):
     
     for subj, rel, obj in triplets:
         # Skip if too short or contains unwanted characters
-        if len(subj) < 2 or len(obj) < 2:
+        if len(subj) < 2 or len(obj) < 2 or len(rel)<2:
             continue
         if any(char in subj + obj for char in ['*', '[', ']']):
             continue
@@ -166,7 +259,7 @@ def clean_triplets(triplets):
 
 
 def main_generate_triplets_hardcoded():
-    texts = [text, text1, text2, text4]
+    texts = [text, text1, text2, text3, text4, text5]
     out = []
     
     for i, t in enumerate(texts, 1):
@@ -176,10 +269,20 @@ def main_generate_triplets_hardcoded():
         out.append(cleaned_triplets)
     
     return out
-    
+
+
+def get_hardcoded_texts():
+    return [text, text1, text2, text3, text4, text5]
+
+
+def main_generate_triplets(nlp, text:str)-> list[tuple[str, str, str]]:
+    doc = nlp(text)
+    triplets = extract_triplets(doc)
+    return clean_triplets(triplets)
+
 
 if __name__ == "__main__":
-    texts = [text, text1, text2, text4, text5, text6]
+    texts = [text, text1, text2, text3, text4, text5, text6]
     
     for i, t in enumerate(texts, 1):
         print(f"\n--- Text {i} ---")
