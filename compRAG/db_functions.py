@@ -32,6 +32,29 @@ def init_db(db_path="hotpot_qa.db"):
         FOREIGN KEY (chunk_id) REFERENCES chunks(id)
     )
     ''')
+
+    # Table for embeddings
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS embeddings (
+        embed_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        triplet_id INTEGER,           -- foreign key to triplets.id
+        sub_emb BLOB,                 -- serialized subject embedding
+        rel_emb BLOB,                 -- serialized relation embedding
+        obj_emb BLOB,                 -- serialized object embedding
+        FOREIGN KEY (triplet_id) REFERENCES triplets(id)
+    )
+    ''')
+
+    # Table for HRR vectors
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS hrr_vectors (
+        hrr_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chunk_id TEXT,        
+        hrr_vector BLOB,              -- serialized HRR vector
+        FOREIGN KEY (chunk_id) REFERENCES chunks(id)
+    )
+    ''')
+
     conn.commit()
     return conn
 
@@ -45,7 +68,7 @@ def save_chunks_batch(conn, chunk_batch):
 
 def save_triplets_batch(conn,triplets_batch):
     with conn:
-        conn.executemany("INSERT INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", triplets_batch)
+        conn.executemany("INSERT OR IGNORE INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", triplets_batch)
 
 def get_processed_chunk_ids(conn):
     """Return set of already processed chunk IDs"""
@@ -64,7 +87,7 @@ def process_chunk(chunk):
 
 
 def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
-                    batch_size=100, num_workers=4):
+                    batch_size=400, num_workers=4):
     ds_dict = load_dataset(dataset_name, subset)
     ds = ds_dict[subset]
 
@@ -107,7 +130,7 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
     print("Dataset processing complete.")
 
 if __name__ == "__main__":
-    process_dataset()
+    init_db(db_path="hotpot_qa.db")
 
 # ds = load_dataset("BeIR/hotpotqa","corpus")
 # print(ds["corpus"][0])
