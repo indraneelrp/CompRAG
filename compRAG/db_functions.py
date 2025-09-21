@@ -2,7 +2,7 @@ import sqlite3
 from make_triplets import main_generate_triplets
 import spacy
 from datasets import load_dataset
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 nlp = spacy.load("en_core_web_sm")
 
@@ -35,36 +35,76 @@ def init_db(db_path="hotpot_qa.db"):
     conn.commit()
     return conn
 
-def save_chunk(conn, chunk):
-    c = conn.cursor()
-    c.execute(
-        "INSERT OR IGNORE INTO chunks (id, title, text) VALUES (?, ?, ?)",
-        (chunk['id'], chunk.get('title', ''), chunk['text'])
-    )
-    conn.commit()
-
-def save_triplets(conn, chunk_id, triplets):
-    c = conn.cursor()
-    for subj, rel, obj in triplets:
-        c.execute(
-            "INSERT INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)",
-            (chunk_id, subj, rel, obj)
+def save_chunks_batch(conn, chunk_batch):
+    with conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO chunks (id, title, text) VALUES (?, ?, ?)",
+            [(chunk['id'], chunk.get('title', ''), chunk['text']) for chunk in chunk_batch]
         )
     conn.commit()
 
-def process_dataset(dataset_name="BeIR/hotpotqa", subset = "corpus", split="corpus", limit=None):
-    ds = load_dataset(dataset_name,subset)
-    ds = ds[split]
+def save_triplets_batch(conn,triplets_batch):
+    with conn:
+        conn.executemany("INSERT INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", triplets_batch)
+
+def get_processed_chunk_ids(conn):
+    """Return set of already processed chunk IDs"""
+    c = conn.cursor()
+    c.execute("SELECT id FROM chunks")
+    return set(row[0] for row in c.fetchall())
+
+def process_chunk(chunk):
+    """Run in separate process"""
+    nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+    chunk_id = chunk['_id']
+    text = chunk['text']
+    triplets = main_generate_triplets(nlp, text)
+    triplets_db = [(chunk_id, s, r, o) for s, r, o in triplets]
+    return {'id': chunk_id, 'title': chunk.get('title',''), 'text': text}, triplets_db
+
+
+def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
+                    batch_size=100, num_workers=4):
+    ds_dict = load_dataset(dataset_name, subset)
+    ds = ds_dict[subset]
+
     if limit:
         ds = ds.select(range(limit))
+
     conn = init_db()
-    
-    for chunk in ds:
-        save_chunk(conn, {'id': chunk['_id'], 'title': chunk.get('title', ''), 'text': chunk['text']})
-        triplets = main_generate_triplets(nlp, chunk['text'])
-        save_triplets(conn, chunk['_id'], triplets)
-    
+    processed_ids = get_processed_chunk_ids(conn)
+
+    chunks_batch = []
+    triplets_batch = []
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {}
+        for chunk in ds:
+            if chunk['_id'] in processed_ids:
+                continue  # skip already processed
+            future = executor.submit(process_chunk, chunk)
+            futures[future] = chunk['_id']
+
+        for i, future in enumerate(as_completed(futures), 1):
+            chunk_data, triplets_data = future.result()
+            chunks_batch.append(chunk_data)
+            triplets_batch.extend(triplets_data)
+
+            # Batch insert
+            if i % batch_size == 0:
+                save_chunks_batch(conn, chunks_batch)
+                save_triplets_batch(conn, triplets_batch)
+                chunks_batch.clear()
+                triplets_batch.clear()
+                print(f"Processed {i} new chunks...")
+
+    # Insert remaining
+    if chunks_batch:
+        save_chunks_batch(conn, chunks_batch)
+        save_triplets_batch(conn, triplets_batch)
+
     conn.close()
+    print("Dataset processing complete.")
 
 if __name__ == "__main__":
     process_dataset()
