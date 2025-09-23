@@ -3,12 +3,19 @@ from make_triplets import main_generate_triplets
 import spacy
 from datasets import load_dataset
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+db_path = os.getenv("HOTPOT_DB")
 
 nlp = spacy.load("en_core_web_sm")
 
 
-
-def init_db(db_path="hotpot_qa.db"):
+def init_db(db_path):
+    if not db_path:
+        raise ValueError("Set HOTPOT_DB in your .env file")
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
@@ -32,6 +39,29 @@ def init_db(db_path="hotpot_qa.db"):
         FOREIGN KEY (chunk_id) REFERENCES chunks(id)
     )
     ''')
+
+    # Table for embeddings
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS embeddings (
+        embed_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        triplet_id INTEGER,           -- foreign key to triplets.id
+        sub_emb BLOB,                 -- serialized subject embedding
+        rel_emb BLOB,                 -- serialized relation embedding
+        obj_emb BLOB,                 -- serialized object embedding
+        FOREIGN KEY (triplet_id) REFERENCES triplets(id)
+    )
+    ''')
+
+    # Table for HRR vectors
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS hrr_vectors (
+        hrr_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chunk_id TEXT,        
+        hrr_vector BLOB,              -- serialized HRR vector
+        FOREIGN KEY (chunk_id) REFERENCES chunks(id)
+    )
+    ''')
+
     conn.commit()
     return conn
 
@@ -45,7 +75,7 @@ def save_chunks_batch(conn, chunk_batch):
 
 def save_triplets_batch(conn,triplets_batch):
     with conn:
-        conn.executemany("INSERT INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", triplets_batch)
+        conn.executemany("INSERT OR IGNORE INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", triplets_batch)
 
 def get_processed_chunk_ids(conn):
     """Return set of already processed chunk IDs"""
@@ -64,14 +94,14 @@ def process_chunk(chunk):
 
 
 def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
-                    batch_size=100, num_workers=4):
+                    batch_size=400, num_workers=4):
     ds_dict = load_dataset(dataset_name, subset)
     ds = ds_dict[subset]
 
     if limit:
         ds = ds.select(range(limit))
 
-    conn = init_db()
+    conn = init_db(db_path)
     processed_ids = get_processed_chunk_ids(conn)
 
     chunks_batch = []

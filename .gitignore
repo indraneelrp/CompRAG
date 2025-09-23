@@ -41,3 +41,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 hotpot_qa.db
+# dotenv environment variables file
+.env
