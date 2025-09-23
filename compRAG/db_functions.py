@@ -3,12 +3,19 @@ from make_triplets import main_generate_triplets
 import spacy
 from datasets import load_dataset
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+db_path = os.getenv("HOTPOT_DB")
 
 nlp = spacy.load("en_core_web_sm")
 
 
-
-def init_db(db_path="hotpot_qa.db"):
+def init_db(db_path):
+    if not db_path:
+        raise ValueError("Set HOTPOT_DB in your .env file")
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
@@ -94,7 +101,7 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
     if limit:
         ds = ds.select(range(limit))
 
-    conn = init_db()
+    conn = init_db(db_path)
     processed_ids = get_processed_chunk_ids(conn)
 
     chunks_batch = []
@@ -130,7 +137,7 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
     print("Dataset processing complete.")
 
 if __name__ == "__main__":
-    init_db(db_path="hotpot_qa.db")
+    process_dataset()
 
 # ds = load_dataset("BeIR/hotpotqa","corpus")
 # print(ds["corpus"][0])
