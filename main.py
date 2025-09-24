@@ -49,8 +49,29 @@ class CompRAGSystem:
         - Load SpaCy model
         - Set up instance variables (index, mappings, etc.)
         """
-        pass
-    
+        self.db_path = db_path or os.getenv("HOTPOT_DB")
+        self.ollama_url = ollama_url
+        self.conn = sqlite3.connect(self.db_path)
+        self.index = None
+        self.id_to_chunk = {}
+
+        self.dim = 384  
+        self.max_elements = 100000
+
+        if not self.db_path:
+            raise ValueError("Set HOTPOT_DB in your .env file")
+        
+        self.conn = init_db(self.db_path)  
+
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+        except Exception as e:
+            raise RuntimeError("Failed to load SpaCy model. Ensure 'en_core_web_sm' is installed.") from e
+        
+        self.index = None  # HNSW search index
+        self.vector_to_chunk = {}  # Maps vector IDs to chunk IDs
+        self.is_index_built = False
+
     def setup_database(self, dataset_name: str = "BeIR/hotpotqa", limit: int = None):
         """
         TODO Phase 1: Process dataset and populate database
