@@ -50,7 +50,7 @@ try:
         #     print(decoded_line['response']) # print every fifth token
         if line:
             decoded_line = json.loads(line.decode('utf-8'))
-            
+            print(decoded_line )
             full_response.append(decoded_line['response'])
 finally:
     response.close()
