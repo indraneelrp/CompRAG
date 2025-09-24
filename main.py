@@ -107,7 +107,43 @@ class CompRAGSystem:
         - Add vectors to index
         - Create mapping from vector IDs to chunk IDs
         """
-        pass
+        print("🔍 Building search index...")
+        if not self.conn:
+            raise RuntimeError("Database connection not available")
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT hrr_id, chunk_id, hrr_vector 
+            FROM hrr_vectors 
+            WHERE hrr_vector IS NOT NULL
+        """)
+        hrr_data = cursor.fetchall()
+        
+        if not hrr_data:
+            raise RuntimeError("No HRR vectors found in database. Run setup_database first.")
+        
+        print(f"Found {len(hrr_data)} HRR vectors")
+            
+        vectors = []
+        vector_ids = []
+        
+        for hrr_id, chunk_id, hrr_blob in hrr_data:
+            hrr_vector = np.frombuffer(hrr_blob, dtype=np.float32)
+            vectors.append(hrr_vector)
+            vector_ids.append(hrr_id)
+            
+            self.vector_to_chunk[hrr_id] = chunk_id
+        
+        print("Initializing HNSW index...")
+        self.index = initialise_hnsw(dim, max_elements)
+        
+        print("Adding vectors to index...")
+        add_items(self.index, vectors, vector_ids)
+        
+        self.is_index_built = True
+        
+        print(f"✅ Search index built successfully with {len(vectors)} vectors")
+
     
     def process_query(self, query: str) -> List[Tuple[str, str, str]]:
         """
@@ -116,7 +152,26 @@ class CompRAGSystem:
         - Handle case where no triplets found
         - Return list of (subject, relation, object) tuples
         """
-        pass
+        print(f"❓ Processing query: '{query}'")
+    
+        if not query or not query.strip():
+            return []
+        
+        try:
+            triplets = main_generate_triplets(self.nlp, query.strip())
+            
+            if triplets:
+                print(f"✅ Extracted {len(triplets)} triplets")
+                for i, (s, r, o) in enumerate(triplets):
+                    print(f"      {i+1}. ({s}, {r}, {o})")
+                return triplets
+            else: 
+                print("⚠️  Could not create any triplets from query")
+                return []
+            
+        except Exception as e:
+            print(f"   ❌ Error processing query: {str(e)}")
+            return []
     
     def query_to_hrr_vectors(self, query_triplets: List[Tuple[str, str, str]]) -> List[np.ndarray]:
         """
@@ -125,7 +180,72 @@ class CompRAGSystem:
         - Use chunk_embeddings2hrr function  
         - Convert tensors to numpy arrays for HNSW search
         """
-        pass
+        print("🔄 Converting query triplets to HRR vectors...")
+    
+        if not query_triplets:
+            print("   ⚠️  No triplets to convert")
+            return []
+        
+        try:
+            print(f"   📊 Processing {len(query_triplets)} triplets...")
+            
+            valid_triplets = []
+            for s, r, o in query_triplets:
+                if s and r and o: 
+                    valid_triplets.append((str(s), str(r), str(o)))
+                else:
+                    print(f"   ⚠️  Skipping invalid triplet: ({s}, {r}, {o})")
+            
+            if not valid_triplets:
+                print("   ❌ No valid triplets found")
+                return []
+            
+            # Step 2: Convert to embeddings
+            embeddings = chunk_triplets2embeddings(valid_triplets)
+            
+            if not embeddings:
+                print("   ❌ Failed to generate embeddings")
+                return []
+            
+            # Step 3: Convert to HRR vectors
+            hrr_vectors_tensors = chunk_embeddings2hrr(embeddings)
+            
+            # Step 4: Convert to numpy and validate
+            hrr_vectors = []
+            for i, hrr_tensor in enumerate(hrr_vectors_tensors):
+                try:
+                    # Convert to numpy
+                    if hasattr(hrr_tensor, 'cpu'):
+                        hrr_numpy = hrr_tensor.cpu().detach().numpy()
+                    elif hasattr(hrr_tensor, 'numpy'):
+                        hrr_numpy = hrr_tensor.numpy()
+                    else:
+                        hrr_numpy = np.array(hrr_tensor)
+                    
+                    # Validate dimensions
+                    hrr_numpy = hrr_numpy.astype(np.float32)
+                    if hrr_numpy.shape[-1] != 384:  # Expected dimension
+                        print(f"   ⚠️  Vector {i} has wrong dimension: {hrr_numpy.shape}")
+                        continue
+                    
+                    # Flatten if needed
+                    if hrr_numpy.ndim > 1:
+                        hrr_numpy = hrr_numpy.flatten()
+                    
+                    hrr_vectors.append(hrr_numpy)
+                    
+                except Exception as e:
+                    print(f"   ⚠️  Error processing vector {i}: {e}")
+                    continue
+            
+            print(f"   ✅ Generated {len(hrr_vectors)} valid HRR vectors")
+            return hrr_vectors
+            
+        except Exception as e:
+            print(f"   ❌ Error in HRR conversion: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
     
     def retrieve_similar_chunks(self, query_hrr_vectors: List[np.ndarray], k: int = 5) -> Set[str]:
         """
@@ -134,7 +254,44 @@ class CompRAGSystem:
         - Map vector IDs back to chunk IDs
         - Return set of unique chunk IDs
         """
-        pass
+        print(f"🎯 Retrieving top-{k} similar chunks...")
+        
+        # Step 1: Validate inputs
+        if not self.index or not self.is_index_built:
+            print("   ❌ Search index not built. Run build_search_index() first.")
+            return set()
+        
+        if not query_hrr_vectors:
+            print("   ⚠️  No query vectors provided")
+            return set()
+        
+        retrieved_chunk_ids = set()
+        
+        # Step 2: Search for each query vector
+        for i, query_vector in enumerate(query_hrr_vectors):
+            try:
+                # Reshape for HNSW search
+                query_vec_reshaped = query_vector.reshape(1, -1)
+                
+                # Search HNSW index
+                labels, distances = self.index.knn_query(query_vec_reshaped, k=k)
+                
+                print(f"   🔍 Query vector {i+1}: found {len(labels[0])} similar vectors")
+                
+                # Step 3: Map vector IDs to chunk IDs
+                for vector_id in labels[0]:
+                    if vector_id in self.vector_to_chunk:
+                        chunk_id = self.vector_to_chunk[vector_id]
+                        retrieved_chunk_ids.add(chunk_id)
+                    else:
+                        print(f"   ⚠️  Vector ID {vector_id} not found in mapping")
+                
+            except Exception as e:
+                print(f"   ⚠️  Error searching with vector {i}: {e}")
+                continue
+        
+        print(f"   ✅ Retrieved {len(retrieved_chunk_ids)} unique chunks")
+        return retrieved_chunk_ids
     
     def get_chunk_contexts(self, chunk_ids: Set[str]) -> List[Dict]:
         """
@@ -143,7 +300,75 @@ class CompRAGSystem:
         - Format as list of dicts with id, title, text
         - Handle missing chunks
         """
-        pass
+        print(f"📖 Retrieving context for {len(chunk_ids)} chunks...")
+        
+        if not chunk_ids:
+            return []
+        
+        if not self.conn:
+            print("   ❌ Database connection not available")
+            return []
+        
+        contexts = []
+        
+        try:
+            cursor = self.conn.cursor()
+            chunk_id_list = list(chunk_ids)
+            placeholders = ','.join('?' * len(chunk_id_list))
+            
+            query = f"""
+                SELECT id, title, text 
+                FROM chunks 
+                WHERE id IN ({placeholders})
+                ORDER BY id
+            """
+            
+            cursor.execute(query, chunk_id_list)
+            results = cursor.fetchall()
+            
+            print(f"   📊 Found {len(results)} chunks in database")
+            
+            for chunk_id, title, text in results:
+                # Clean and format text
+                clean_text = text.strip() if text else ""
+                clean_title = title.strip() if title else f"Document {chunk_id}"
+                
+                # Skip empty chunks
+                if not clean_text:
+                    print(f"   ⚠️  Skipping empty chunk: {chunk_id}")
+                    continue
+                
+                # Truncate very long texts (optional)
+                max_text_length = 2000  # Adjust based on your LLM context limits
+                if len(clean_text) > max_text_length:
+                    clean_text = clean_text[:max_text_length] + "..."
+                    print(f"   ✂️  Truncated chunk {chunk_id} to {max_text_length} chars")
+                
+                context = {
+                    'id': chunk_id,
+                    'title': clean_title,
+                    'text': clean_text,
+                    'length': len(clean_text)
+                }
+                contexts.append(context)
+            
+            # Report missing chunks
+            found_ids = {result[0] for result in results}
+            missing_ids = chunk_ids - found_ids
+            if missing_ids:
+                print(f"   ⚠️  {len(missing_ids)} chunks not found in database")
+            
+            # Sort by text length (optional - put longer contexts first)
+            contexts.sort(key=lambda x: x['length'], reverse=True)
+            
+            print(f"   ✅ Retrieved {len(contexts)} valid contexts")
+            return contexts
+            
+        except Exception as e:
+            print(f"   ❌ Error retrieving contexts: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
     
     def generate_response(self, query: str, contexts: List[Dict], model: str = "gemma3") -> str:
         """
@@ -153,7 +378,95 @@ class CompRAGSystem:
         - Handle streaming response
         - Return final response text
         """
-        pass
+        if not contexts:
+            return "❌ No relevant context found to answer your question."
+        
+        if not query.strip():
+            return "❌ No query provided."
+        
+        try:
+            # Format context from retrieved chunks
+            context_text = ""
+            for i, ctx in enumerate(contexts, 1):
+                title = ctx.get('title', f"Document {i}")
+                text = ctx.get('text', '')
+                context_text += f"\n--- Document {i}: {title} ---\n{text}\n"
+            
+            # Create prompt template
+            prompt = f"""
+                You are an AI assistant that answers questions based on provided documents. Use only the information from the supplied documents to answer the query. If the information is not available in the documents, state that clearly.
+
+                Documents:
+                {context_text}
+
+                Question: {query}
+
+                Please provide a comprehensive answer based on the information in the documents above. Be specific and cite which documents you're referencing when possible.
+            """
+
+            # Prepare request data
+            data = {
+                "model": model,
+                "prompt": prompt,
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "max_tokens": 1000
+                }
+            }
+            
+            headers = {'Content-Type': 'application/json'}
+            
+            print(f"   📤 Sending request to Ollama (model: {model})")
+            print(f"   📊 Context: {len(contexts)} documents")
+            
+            # Send request to Ollama API
+            response = requests.post(
+                self.ollama_url, 
+                data=json.dumps(data), 
+                headers=headers, 
+                stream=True,
+                timeout=120
+            )
+            
+            if response.status_code != 200:
+                error_msg = f"Ollama API error (status {response.status_code})"
+                print(f"   ❌ {error_msg}")
+                return f"❌ {error_msg}"
+            
+            # Handle streaming response
+            full_response = []
+            print("   🔄 Receiving response...")
+            
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        decoded_line = json.loads(line.decode('utf-8'))
+                        if 'response' in decoded_line:
+                            full_response.append(decoded_line['response'])
+                        
+                        if decoded_line.get('done', False):
+                            break
+                            
+                    except json.JSONDecodeError:
+                        continue
+            
+            final_response = ''.join(full_response)
+            
+            if not final_response.strip():
+                return "❌ Empty response received from Ollama"
+            
+            print(f"   ✅ Response generated ({len(final_response)} characters)")
+            return final_response.strip()
+            
+        except requests.exceptions.Timeout:
+            return "⏱️  Request to Ollama timed out. Check if Ollama is running."
+            
+        except requests.exceptions.ConnectionError:
+            return "🔌 Could not connect to Ollama. Make sure Ollama is running (try: ollama serve)"
+            
+        except Exception as e:
+            return f"❌ Error generating response: {str(e)}"
     
     def answer_query(self, query: str, k: int = 5) -> Dict:
         """
