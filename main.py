@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 import spacy
 
 # Import your CompRAG modules
-from compRAG.db_functions import init_db
+from compRAG.db_functions import init_db, process_dataset, get_all_hrr_vectors
 from compRAG.make_triplets import main_generate_triplets  
 from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
 from compRAG.retrieve import initialise_hnsw, add_items
@@ -78,8 +78,27 @@ class CompRAGSystem:
         - Call your process_dataset function from db_functions
         - Start with small limit for testing (e.g. 50 documents)
         """
-        pass
-    
+        print(f"📊 Setting up database with dataset: {dataset_name}")
+        if limit:
+            print(f"   Processing limit: {limit} documents")
+        else:
+            print("   Processing: ALL documents (this may take a while)")
+        
+        try:
+            process_dataset(
+                dataset_name=dataset_name,
+                subset="corpus", 
+                limit=limit,
+                batch_size=100,  
+                num_workers=2    
+            )
+            print("✅ Database setup completed successfully")
+            
+        except Exception as e:
+            print(f"❌ Error during database setup: {str(e)}")
+            raise
+
+
     def build_search_index(self, dim: int = 384, max_elements: int = 100000):
         """
         TODO Phase 2: Build HNSW index from stored HRR vectors
