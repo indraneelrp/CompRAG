@@ -61,7 +61,6 @@ def chunk_triplets2embeddings(chunk_triplets: list[tuple[str, str, str]]):
         embed_R = embedding_model.encode([R])[0]
         embed_y = embedding_model.encode([y])[0]
         chunk_triplets_embed.append([embed_x, embed_R, embed_y])
-    chunk_triplets_embed.append(chunk_triplets_embed)
     return chunk_triplets_embed
 
 def chunk_embeddings2hrr(chunk_triplet_embeddings: list[list[Any]]):

@@ -1,8 +1,11 @@
 # CompRAG
+
 Comp is for COMPrehension and COMPosition: Retrieval that comprehends any source text with composition and graph methods.
 
 ## Test that you are ready to run this repo
+
 To check that you are ready to use this repo, in a new environment, do the following:
+
 - Install Ollama
 - In a new terminal run `Ollama run gemma3`
 - Then run `Ollama run mxbai-embed-large`. This installs the necessary models for the test script.
