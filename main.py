@@ -28,6 +28,7 @@ import json
 from typing import List, Tuple, Dict, Set, Optional
 from dotenv import load_dotenv
 import spacy
+import time 
 
 # Import your CompRAG modules
 from compRAG.db_functions import init_db, process_dataset, get_all_hrr_vectors
@@ -469,16 +470,106 @@ class CompRAGSystem:
             return f"❌ Error generating response: {str(e)}"
     
     def answer_query(self, query: str, k: int = 5) -> Dict:
-        """
-        TODO Phase 6: Main pipeline orchestration
-        - Call process_query() to get triplets
-        - Call query_to_hrr_vectors() to get HRR vectors
-        - Call retrieve_similar_chunks() to find relevant chunks
-        - Call get_chunk_contexts() to get text
-        - Call generate_response() to get final answer
-        - Return dict with query, results, and response
-        """
-        pass
+        """Main pipeline orchestration - processes query and returns complete response"""
+        print(f"\n{'='*60}")
+        print(f"🎯 PROCESSING QUERY: {query}")
+        print(f"{'='*60}")
+        
+        start_time = time.time()
+        
+        try:
+            # Step 1: Extract triplets from query
+            print("\n📝 Step 1: Extracting triplets from query...")
+            triplets = self.process_query(query)
+            
+            if not triplets:
+                return {
+                    'query': query,
+                    'triplets': [],
+                    'retrieved_chunks': 0,
+                    'response': "Could not extract meaningful triplets from your query. Try rephrasing your question.",
+                    'success': False,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Step 2: Convert triplets to HRR vectors
+            print("\n🧮 Step 2: Converting triplets to HRR vectors...")
+            hrr_vectors = self.query_to_hrr_vectors(triplets)
+            
+            if not hrr_vectors:
+                return {
+                    'query': query,
+                    'triplets': triplets,
+                    'retrieved_chunks': 0,
+                    'response': "Failed to convert query triplets to searchable vectors.",
+                    'success': False,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Step 3: Search for similar chunks
+            print("\n🔍 Step 3: Searching for similar chunks...")
+            chunk_ids = self.retrieve_similar_chunks(hrr_vectors, k=k)
+            
+            if not chunk_ids:
+                return {
+                    'query': query,
+                    'triplets': triplets,
+                    'retrieved_chunks': 0,
+                    'response': "No relevant documents found for your query. Try different keywords or check if the database contains relevant information.",
+                    'success': False,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Step 4: Get context text
+            print("\n📖 Step 4: Retrieving context text...")
+            contexts = self.get_chunk_contexts(chunk_ids)
+            
+            if not contexts:
+                return {
+                    'query': query,
+                    'triplets': triplets,
+                    'retrieved_chunks': 0,
+                    'response': "Found relevant document IDs but could not retrieve their content from database.",
+                    'success': False,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Step 5: Generate response
+            print("\n🤖 Step 5: Generating response...")
+            response = self.generate_response(query, contexts)
+            
+            # Step 6: Compile results
+            processing_time = time.time() - start_time
+            
+            result = {
+                'query': query,
+                'triplets': triplets,
+                'retrieved_chunks': len(contexts),
+                'response': response,
+                'success': True,
+                'processing_time': processing_time,
+                'chunk_ids': list(chunk_ids),
+                'context_titles': [ctx.get('title', 'Unknown') for ctx in contexts]
+            }
+            
+            print(f"\n✅ QUERY PROCESSING COMPLETE")
+            print(f"   ⏱️  Processing time: {processing_time:.2f} seconds")
+            print(f"   🔗 Triplets extracted: {len(triplets)}")
+            print(f"   📄 Documents retrieved: {len(contexts)}")
+            print(f"   📝 Response length: {len(response)} characters")
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"Error processing query: {str(e)}"
+            print(f"\n❌ PIPELINE ERROR: {error_msg}")
+            
+            return {
+                'query': query,
+                'error': error_msg,
+                'success': False,
+                'processing_time': time.time() - start_time
+            }
     
     def interactive_mode(self):
         """
