@@ -6,16 +6,32 @@ import numpy as np
 from compRAG.make_triplets import main_generate_triplets_hardcoded, main_generate_triplets, get_hardcoded_texts
 from compRAG.encode import doc_triplets2embeddings, doc_embeddings2hrr
 
-def initialise_hnsw(dim, max_elems):
+def initialise_hnsw(dim: int, max_elems: int)-> hnswlib.Index:
     index = hnswlib.Index(space='cosine', dim=dim)
     index.init_index(max_elements=max_elems, ef_construction=200, M=16)
     return index
 
-def add_items(index, vecs, ids):
+def add_items(index: hnswlib.Index, 
+              vecs: Sequence[Sequence[float]] | np.ndarray, 
+              ids: Sequence[int] | np.ndarray)-> None:
     vecs = np.array(vecs, dtype=np.float32)
     ids = np.array(ids, dtype=np.int32)
     index.add_items(vecs, ids)
 
+def get_nearest_triplet_ids(query_hrrs: list[torch.Tensor], index: hnswlib.Index, k=2)-> list[int]:
+    matched_triplet_ids: list[int] = []
+    if not query_hrrs:
+        return matched_triplet_ids
+    for query_hrr in query_hrrs:     
+        if isinstance(query_hrr, torch.Tensor):
+            query_hrr = query_hrr.detach().cpu().numpy().astype(np.float32)
+        else:
+            query_hrr = np.asarray(query_hrr, dtype=np.float32)
+
+        # hnswlib expects shape (n_queries, dim)
+        labels, distances = index.knn_query(query_hrr.reshape(1, -1), k=k)
+        matched_triplet_ids.extend(labels[0].tolist()) # labels[0] bcause shape of labels is [[l1, l2,...]]
+    return matched_triplet_ids
 
 def test_top_k_hardcoded():
     print("===========\ncheck top-k\n----------")
@@ -86,6 +102,8 @@ if __name__ == "__main__":
         for query_hrr in q_t_hrr[0]:
             labels, distances = index.knn_query(query_hrr, k=2)
             print(labels)
+            # for d in distances[0]:
+            #     print(1 - d)
             for l in labels[0]:
                 print(id_to_t[l])    # print the exact triplet that matched
                 # print(id_to_chunk[l])   # print the entire chunk from where the matched triplet came
