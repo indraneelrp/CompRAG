@@ -5,10 +5,13 @@ Squash 3 vectors to 1 vector using the implementation given in HRR_pytorch.py
 Save a triplets' HRR vector
 '''
 from sentence_transformers import SentenceTransformer
-from HRR_pytorch import projection, binding
+from sklearn.metrics.pairwise import cosine_similarity
 from typing import Any
 import torch
 import numpy as np
+
+from compRAG.make_triplets import main_generate_triplets_hardcoded
+from compRAG.HRR_pytorch import projection, binding, unbinding
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')   # dim 384 
