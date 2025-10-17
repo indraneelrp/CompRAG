@@ -1,5 +1,4 @@
 import sqlite3
-from make_triplets import main_generate_triplets
 import spacy
 from datasets import load_dataset
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -7,7 +6,9 @@ from dotenv import load_dotenv
 import os
 import numpy as np
 import torch
-from encode import chunk_triplets2embeddings, chunk_embeddings2hrr
+
+from compRAG.make_triplets import main_generate_triplets
+from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
 
 load_dotenv()
 

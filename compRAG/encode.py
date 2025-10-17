@@ -6,11 +6,12 @@ Save a triplets' HRR vector
 '''
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from make_triplets import main_generate_triplets_hardcoded
-from HRR_pytorch import projection, binding, unbinding
 from typing import Any
 import torch
 import torch.nn.functional as F
+
+from compRAG.make_triplets import main_generate_triplets_hardcoded
+from compRAG.HRR_pytorch import projection, binding, unbinding
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
