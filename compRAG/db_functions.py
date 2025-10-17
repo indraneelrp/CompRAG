@@ -1,4 +1,5 @@
 import sqlite3
+from .make_triplets import main_generate_triplets
 import spacy
 from datasets import load_dataset
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -6,9 +7,7 @@ from dotenv import load_dotenv
 import os
 import numpy as np
 import torch
-
-from compRAG.make_triplets import main_generate_triplets
-from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
+from .encode import chunk_triplets2embeddings, chunk_embeddings2hrr
 
 load_dotenv()
 
@@ -111,6 +110,7 @@ def process_chunk(chunk):
             # Convert triplets to HRR vectors
             triplet_embeddings = chunk_triplets2embeddings(triplets)
             hrr_vecs = chunk_embeddings2hrr(triplet_embeddings)
+            print(f"HRR vectors generated: {len(hrr_vecs)}")
             
             # Serialize HRR vectors for database storage
             for hrr_vec in hrr_vecs:
@@ -134,6 +134,8 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
 
     conn = init_db(db_path)
     processed_ids = get_processed_chunk_ids(conn)
+    existing_hrr_chunks = set(row[0] for row in conn.execute("SELECT chunk_id FROM hrr_vectors"))
+
 
     chunks_batch = []
     triplets_batch = []
@@ -142,7 +144,7 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {}
         for chunk in ds:
-            if chunk['_id'] in processed_ids:
+            if chunk['_id'] in existing_hrr_chunks:
                 continue  # skip already processed
             future = executor.submit(process_chunk, chunk)
             futures[future] = chunk['_id']
@@ -255,7 +257,7 @@ if __name__ == "__main__":
         print("Test completed successfully!")
     else:
         # Default processing
-        process_dataset()
+        process_dataset(limit=5)
 
 # ds = load_dataset("BeIR/hotpotqa","corpus")
 # print(ds["corpus"][0])
