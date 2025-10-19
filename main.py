@@ -594,7 +594,27 @@ def main():
     - Test with sample queries
     - Run interactive_mode()
     """
-    pass
+    # Initialize the system
+    compRAG = CompRAGSystem()
+
+    # Step 1: Set up database with a small subset for testing
+    compRAG.setup_database(limit=10)  # Only process 10 chunks for quick testing
+
+    # Step 2: Build the HNSW search index
+    compRAG.build_search_index(dim=384, max_elements=1000)
+
+    # Step 3: Run a test query
+    test_query = "Who was the tutor of Alexander the Great which made him the man he was?"
+    result = compRAG.answer_query(test_query, k=3)  # Retrieve top 3 chunks
+
+    print("\n=== TEST QUERY RESULT ===")
+    print(f"Query: {result['query']}")
+    print(f"Triplets extracted: {result.get('triplets', [])}")
+    print(f"Documents retrieved: {result.get('retrieved_chunks', 0)}")
+    print(f"Response: {result.get('response', '')}")
+
+    # Close database connection
+    compRAG.close()
 
 
 if __name__ == "__main__":

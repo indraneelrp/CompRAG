@@ -1,10 +1,13 @@
 '''
 Call HNSW search given query HRR vectors
 '''
+import torch
 import hnswlib
 import numpy as np
 from compRAG.make_triplets import main_generate_triplets_hardcoded, main_generate_triplets, get_hardcoded_texts
 from compRAG.encode import doc_triplets2embeddings, doc_embeddings2hrr
+from typing import Sequence
+
 
 def initialise_hnsw(dim: int, max_elems: int)-> hnswlib.Index:
     index = hnswlib.Index(space='cosine', dim=dim)
