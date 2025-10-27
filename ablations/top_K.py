@@ -10,8 +10,8 @@ import os
 from dotenv import load_dotenv
 
 # Import from existing compRAG modules
-from retrieve import initialise_hnsw, add_items
-from encode import embedding_model  # Use shared embedding model instance
+from compRAG.retrieve import initialise_hnsw, add_items
+from compRAG.encode import EMBEDDING_MODEL  # Use shared embedding model instance
 
 load_dotenv()
 
@@ -21,19 +21,20 @@ class TopKRetriever:
     Uses existing HNSW utilities from retrieve.py and shared encoder from encode.py.
     """
     
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = ""):
         """
         Initialize the top-k retriever.
         
         Args:
             db_path: Path to SQLite database (defaults to HOTPOT_DB env var)
         """
-        self.db_path = db_path or os.getenv("HOTPOT_DB")
+        resolved_env = os.getenv("HOTPOT_DB")
+        self.db_path: str = (db_path or (resolved_env if resolved_env else "hotpot.db"))
         if not self.db_path:
             raise ValueError("Set HOTPOT_DB in your .env file or pass db_path")
         
         # Use shared embedding model from encode.py (dim 384)
-        self.embedding_model = embedding_model
+        self.embedding_model = EMBEDDING_MODEL
         self.embed_dim = 384
         
         self.index = None

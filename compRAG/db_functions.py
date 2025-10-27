@@ -1,5 +1,5 @@
 import sqlite3
-from .make_triplets import main_generate_triplets
+from compRAG.make_triplets import main_generate_triplets
 import spacy
 from datasets import load_dataset
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 import os
 import numpy as np
 import torch
-from .encode import chunk_triplets2embeddings, chunk_embeddings2hrr
+from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
+from typing import Dict, Any
 
 load_dotenv()
 
@@ -144,6 +145,7 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {}
         for chunk in ds:
+            chunk: Dict[str, Any]
             if chunk['_id'] in existing_hrr_chunks:
                 continue  # skip already processed
             future = executor.submit(process_chunk, chunk)

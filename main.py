@@ -42,7 +42,7 @@ load_dotenv()
 class CompRAGSystem:
     """Main CompRAG system orchestrator"""
     
-    def __init__(self, db_path: str = None, ollama_url: str = "http://localhost:11434/api/generate"):
+    def __init__(self, db_path: str = "", ollama_url: str = "http://localhost:11434/api/generate"):
         """
         TODO Phase 1: Initialize system
         - Set db_path and ollama_url
@@ -50,7 +50,8 @@ class CompRAGSystem:
         - Load SpaCy model
         - Set up instance variables (index, mappings, etc.)
         """
-        self.db_path = db_path or os.getenv("HOTPOT_DB")
+        resolved_env = os.getenv("HOTPOT_DB")
+        self.db_path: str = (db_path or (resolved_env if resolved_env else "hotpot.db"))
         self.ollama_url = ollama_url
         self.conn = sqlite3.connect(self.db_path)
         self.index = None
@@ -73,7 +74,7 @@ class CompRAGSystem:
         self.vector_to_chunk = {}  # Maps vector IDs to chunk IDs
         self.is_index_built = False
 
-    def setup_database(self, dataset_name: str = "BeIR/hotpotqa", limit: int = None):
+    def setup_database(self, dataset_name: str = "BeIR/hotpotqa", limit: int = 2):
         """
         TODO Phase 1: Process dataset and populate database
         - Call your process_dataset function from db_functions
