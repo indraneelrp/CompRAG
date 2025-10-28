@@ -4,16 +4,18 @@ Uses hardcoded text samples from make_triplets.py for rapid testing.
 Perfect for development before running on full HotpotQA dataset.
 """
 
-from make_triplets import get_hardcoded_texts, main_generate_triplets
-from encode import embedding_model, doc_triplets2embeddings, doc_embeddings2hrr
-from retrieve import initialise_hnsw, add_items
+from .make_triplets import main_generate_triplets
+from .retrieve import initialise_hnsw, add_items
 import numpy as np
 import time
 import spacy
+from sentence_transformers import SentenceTransformer
+from .encode import doc_triplets2embeddings, doc_embeddings2hrr
+from .text_samples import get_hardcoded_texts
 
-# Load spacy model
+# Load models
 nlp = spacy.load("en_core_web_sm")
-
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 class QuickTester:
     """Quick tester for retrieval methods using hardcoded samples"""
@@ -101,18 +103,30 @@ class QuickTester:
             if hit:
                 correct += 1
             
-            # Print results
+            # Print results with explanation
             status = "✓" if hit else "✗"
             print(f"\n{status} Query: '{query}'")
-            print(f"  Expected doc: {expected_idx}")
+            print(f"  Expected answer: {query_data['answer']}")
+            print(f"  Expected in doc: {expected_idx}")
             print(f"  Retrieved (top-{k}): {list(retrieved_indices)}")
-            print(f"  Top match: {top_match} (distance: {distances[0][0]:.4f})")
+            
+            # Show what was actually retrieved
+            for rank, idx in enumerate(retrieved_indices, 1):
+                doc_preview = self.texts[idx][:100].replace('\n', ' ')
+                marker = "✓" if idx == expected_idx else " "
+                print(f"    {marker} Rank {rank}: Doc {idx} - \"{doc_preview}...\"")
+            
             print(f"  Latency: {latency:.2f}ms")
         
         accuracy = correct / total
         print(f"\n{'='*70}")
         print(f"Accuracy (Hit@{k}): {correct}/{total} = {accuracy:.2%}")
         print(f"{'='*70}")
+        
+        print(f"\n📊 ANALYSIS:")
+        print(f"  • Successfully retrieved correct doc: {correct}/{total}")
+        print(f"  • Failed to retrieve correct doc: {total - correct}/{total}")
+        print(f"  • Average latency: {np.mean([d for d in [latency]*total]):.2f}ms")
         
         return accuracy
     
@@ -174,7 +188,9 @@ class QuickTester:
             
             if not query_triplets:
                 print(f"\n✗ Query: '{query}'")
-                print(f"  No triplets extracted from query!")
+                print(f"  Expected answer: {query_data['answer']}")
+                print(f"  ⚠️  ERROR: No triplets extracted from query!")
+                print(f"  This is a failure of the SpaCy triple extraction")
                 continue
             
             # Convert query triplets to HRR
@@ -184,7 +200,9 @@ class QuickTester:
             # Search with first query HRR vector
             if len(query_hrr[0]) == 0:
                 print(f"\n✗ Query: '{query}'")
-                print(f"  No HRR vectors created from query!")
+                print(f"  Expected answer: {query_data['answer']}")
+                print(f"  ⚠️  ERROR: No HRR vectors created from query!")
+                print(f"  Triplets were extracted but HRR encoding failed")
                 continue
             
             query_vec = query_hrr[0][0].cpu().detach().numpy()
@@ -213,13 +231,26 @@ class QuickTester:
             if hit:
                 correct += 1
             
-            # Print results
+            # Print results with detailed explanation
             status = "✓" if hit else "✗"
             print(f"\n{status} Query: '{query}'")
+            print(f"  Expected answer: {query_data['answer']}")
+            print(f"  Expected in doc: {expected_idx}")
+            
+            if not query_triplets:
+                print(f"  ⚠️  ERROR: No triplets extracted from query!")
+                print(f"  Cannot perform triple-based retrieval")
+                continue
+            
             print(f"  Query triplets: {query_triplets}")
-            print(f"  Expected doc: {expected_idx}")
             print(f"  Retrieved (top-{k} docs): {unique_docs}")
-            print(f"  Top match: {unique_docs[0] if unique_docs else 'None'}")
+            
+            # Show what was actually retrieved
+            for rank, doc_idx in enumerate(unique_docs, 1):
+                doc_preview = self.texts[doc_idx][:80].replace('\n', ' ')
+                marker = "✓" if doc_idx == expected_idx else " "
+                print(f"    {marker} Rank {rank}: Doc {doc_idx} - \"{doc_preview}...\"")
+            
             print(f"  Latency: {latency:.2f}ms")
         
         accuracy = correct / total
@@ -238,20 +269,30 @@ class QuickTester:
         vanilla_acc = self.test_vanilla_topk(k=k)
         triple_acc = self.test_triple_hrr(k=k)
         
-        print("\n" + "="*70)
-        print("FINAL COMPARISON")
+        print(f"\n" + "="*70)
+        print(f"FINAL COMPARISON")
         print("="*70)
         print(f"Vanilla Top-K Accuracy:  {vanilla_acc:.2%}")
         print(f"Triple-HRR Accuracy:     {triple_acc:.2%}")
         
+        print(f"\n📈 KEY INSIGHTS:")
         if triple_acc > vanilla_acc:
             improvement = ((triple_acc - vanilla_acc) / vanilla_acc) * 100
-            print(f"\n🎉 Triple-HRR is {improvement:.1f}% better than baseline!")
+            print(f"🎉 Triple-HRR is {improvement:.1f}% better than baseline!")
+            print(f"   → Triple structure matching works better for these queries")
         elif vanilla_acc > triple_acc:
             degradation = ((vanilla_acc - triple_acc) / vanilla_acc) * 100
-            print(f"\n⚠️  Triple-HRR is {degradation:.1f}% worse than baseline")
+            print(f"⚠️  Triple-HRR is {degradation:.1f}% worse than baseline")
+            print(f"   → Triple extraction quality is the bottleneck")
+            print(f"   → Vanilla text embeddings work better for these queries")
         else:
-            print(f"\n🤝 Both methods perform equally")
+            print(f"🤝 Both methods perform equally on this test set")
+        
+        print("\n💡 RECOMMENDATIONS:")
+        if triple_acc < vanilla_acc:
+            print("   • Improve triple extraction from questions")
+            print("   • Consider hybrid approach: vanilla + triple re-ranking")
+            print("   • Test on true multi-hop questions (HotpotQA)")
         print("="*70)
 
 

@@ -4,9 +4,10 @@ Call HNSW search given query HRR vectors
 import torch
 import hnswlib
 import numpy as np
-from compRAG.make_triplets import main_generate_triplets_hardcoded, main_generate_triplets, get_hardcoded_texts
-from compRAG.encode import doc_triplets2embeddings, doc_embeddings2hrr
+from .make_triplets import main_generate_triplets, main_generate_triplets_from_list
+from .encode import doc_triplets2embeddings, doc_embeddings2hrr
 from typing import Sequence
+from compRAG.text_samples import get_hardcoded_texts
 
 
 def initialise_hnsw(dim: int, max_elems: int)-> hnswlib.Index:
@@ -66,7 +67,11 @@ def test_top_k_hardcoded():
 
 
 if __name__ == "__main__":
-    t = main_generate_triplets_hardcoded()
+    import spacy
+    nlp = spacy.load("en_core_web_sm")
+
+    h = get_hardcoded_texts()
+    t = main_generate_triplets_from_list(nlp, h)
     t_e = doc_triplets2embeddings(t)
     t_hrr = doc_embeddings2hrr(t_e)
 
@@ -89,8 +94,6 @@ if __name__ == "__main__":
 
     q_txt = '''what was thing the team did differently in publishing their paper?'''
 
-    import spacy
-    nlp = spacy.load("en_core_web_sm")
 
     q_t = main_generate_triplets(nlp, q_txt)
     q_t = [q_t]

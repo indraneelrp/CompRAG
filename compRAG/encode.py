@@ -10,8 +10,7 @@ from typing import Any
 import torch
 import numpy as np
 
-from compRAG.make_triplets import main_generate_triplets_hardcoded
-from compRAG.HRR_pytorch import projection, binding, unbinding
+from .HRR_pytorch import projection, binding, unbinding
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')   # dim 384 
