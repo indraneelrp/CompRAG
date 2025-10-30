@@ -196,6 +196,30 @@ def extract_triplets(doc, is_query=False):
 
         dep_triplets = extract_dependency_triplets(sent)
         triplets.extend(dep_triplets)
+
+        for token in sent:
+            # Look for verbs as potential relations
+            if token.pos_ == "VERB" and not token.is_stop:
+                subjects = find_subjects(token)
+                objects = find_objects(token)
+                
+                # Create triplets for each subject-object combination
+                for subj in subjects:
+                    for obj in objects:
+                        if subj.strip() and obj.strip():
+                            relation = token.lemma_
+                            triplets.append((subj.strip(), relation, obj.strip()))
+            
+            # Also look for copular constructions (is, was, etc.)
+            elif token.lemma_ in ("be", "have") and token.pos_ == "AUX":
+                subjects = find_subjects(token)
+                objects = find_objects(token)
+                
+                for subj in subjects:
+                    for obj in objects:
+                        if subj.strip() and obj.strip():
+                            triplets.append((subj.strip(), token.lemma_, obj.strip()))
+
     if is_query:
         # Add entities
         for ent in doc.ents:
