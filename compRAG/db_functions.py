@@ -135,8 +135,6 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
 
     conn = init_db(db_path)
     processed_ids = get_processed_chunk_ids(conn)
-    existing_hrr_chunks = set(row[0] for row in conn.execute("SELECT chunk_id FROM hrr_vectors"))
-
 
     chunks_batch = []
     triplets_batch = []
@@ -146,7 +144,7 @@ def process_dataset(dataset_name="BeIR/hotpotqa", subset="corpus", limit=None,
         futures = {}
         for chunk in ds:
             chunk: Dict[str, Any]
-            if chunk['_id'] in existing_hrr_chunks:
+            if chunk['_id'] in processed_ids:
                 continue  # skip already processed
             future = executor.submit(process_chunk, chunk)
             futures[future] = chunk['_id']
@@ -259,7 +257,7 @@ if __name__ == "__main__":
         print("Test completed successfully!")
     else:
         # Default processing
-        process_dataset(limit=5)
+        process_dataset()
 
 # ds = load_dataset("BeIR/hotpotqa","corpus")
 # print(ds["corpus"][0])
