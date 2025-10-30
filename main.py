@@ -599,10 +599,10 @@ def main():
     compRAG = CompRAGSystem()
 
     # Step 1: Set up database with a small subset for testing
-    compRAG.setup_database(limit=10)  # Only process 10 chunks for quick testing
+    # compRAG.setup_database(limit=10)  # Only process 10 chunks for quick testing
 
     # Step 2: Build the HNSW search index
-    compRAG.build_search_index(dim=384, max_elements=1000)
+    compRAG.build_search_index(dim=384, max_elements=100000)
 
     # Step 3: Run a test query
     test_query = "Who was the tutor of Alexander the Great which made him the man he was?"
