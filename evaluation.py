@@ -436,12 +436,59 @@ class HotpotQAEvaluator:
         print()
 
 
+# Add this after the HotpotQAEvaluator class
+
+class CompRAGRetriever:
+    """Wrapper to make CompRAG system compatible with evaluation interface"""
+    
+    def __init__(self, db_path: str = None):
+        from main import CompRAGSystem
+        self.comprag = CompRAGSystem(db_path=db_path)
+        # Build index if not already built
+        if not self.comprag.is_index_built:
+            self.comprag.build_search_index()
+    
+    def retrieve(self, query: str, k: int = 5) -> List[Dict]:
+        """
+        Retrieve chunks using CompRAG system
+        
+        Returns:
+            List of chunk dicts with 'id', 'title', 'text' keys
+        """
+        try:
+            # Use your CompRAG pipeline
+            result = self.comprag.answer_query(query, k=k)
+            
+            if not result.get('success', False):
+                return []
+            
+            # Get the retrieved chunk contexts
+            chunk_ids = result.get('chunk_ids', set())
+            contexts = self.comprag.get_chunk_contexts(chunk_ids)
+            
+            # Convert to expected format
+            retrieved_chunks = []
+            for ctx in contexts:
+                chunk_dict = {
+                    'id': ctx['id'],
+                    'title': ctx['title'],
+                    'text': ctx['text']
+                }
+                retrieved_chunks.append(chunk_dict)
+            
+            return retrieved_chunks[:k]  # Ensure we return at most k chunks
+            
+        except Exception as e:
+            print(f"Error in CompRAG retrieval: {e}")
+            return []
+
+
 # ==================== MAIN EXECUTION ====================
 
 def main():
     """Main evaluation script"""
     
-    # Load HotpotQA dev set (distractor setting)
+    # Load HotpotQA dev set (distractor setting) - this is correct!
     print("Loading HotpotQA dataset...")
     dataset = load_dataset("hotpot_qa", "distractor", split="validation")
     
@@ -455,17 +502,12 @@ def main():
     baseline_retriever = TopKRetriever()
     baseline_retriever.build_index()
     
-    # TODO: Initialize other retrievers when implemented
-    # graph_retriever = GraphRetriever()
-    # graph_retriever.build_index()
-    
-    # triple_retriever = TripleHRRRetriever()
-    # triple_retriever.build_index()
+    # CompRAG system
+    comprag_retriever = CompRAGRetriever()
     
     retrievers = {
         'Baseline (Top-K)': baseline_retriever,
-        # 'Method 1 (Graph)': graph_retriever,
-        # 'Method 2 (Triple-HRR)': triple_retriever,
+        'CompRAG (Triple-HRR)': comprag_retriever,
     }
     
     # Run evaluation
@@ -474,7 +516,7 @@ def main():
         retrievers=retrievers,
         dataset=dataset,
         k=5,
-        limit=100  # Start with 100 examples for testing, remove limit for full eval
+        limit=10  # Start very small for testing
     )
     
     # Save results
@@ -482,6 +524,51 @@ def main():
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"\n✅ Results saved to {output_file}")
+
+# def main():
+#     """Main evaluation script"""
+    
+#     # Load HotpotQA dev set (distractor setting)
+#     print("Loading HotpotQA dataset...")
+#     dataset = load_dataset("hotpot_qa", "distractor", split="validation")
+    
+#     # Initialize evaluator
+#     evaluator = HotpotQAEvaluator()
+    
+#     # Initialize retrievers
+#     print("\nInitializing retrievers...")
+    
+#     # Baseline: Top-K
+#     baseline_retriever = TopKRetriever()
+#     baseline_retriever.build_index()
+    
+#     # TODO: Initialize other retrievers when implemented
+#     # graph_retriever = GraphRetriever()
+#     # graph_retriever.build_index()
+    
+#     # triple_retriever = TripleHRRRetriever()
+#     # triple_retriever.build_index()
+    
+#     retrievers = {
+#         'Baseline (Top-K)': baseline_retriever,
+#         # 'Method 1 (Graph)': graph_retriever,
+#         # 'Method 2 (Triple-HRR)': triple_retriever,
+#     }
+    
+#     # Run evaluation
+#     print("\nStarting evaluation...")
+#     results = evaluator.compare_retrievers(
+#         retrievers=retrievers,
+#         dataset=dataset,
+#         k=5,
+#         limit=100  # Start with 100 examples for testing, remove limit for full eval
+#     )
+    
+#     # Save results
+#     output_file = 'evaluation_results.json'
+#     with open(output_file, 'w') as f:
+#         json.dump(results, f, indent=2)
+#     print(f"\n✅ Results saved to {output_file}")
 
 
 if __name__ == "__main__":
