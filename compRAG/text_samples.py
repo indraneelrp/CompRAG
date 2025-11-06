@@ -29,6 +29,14 @@ Not everyone thought this idea was going to rock the world, including Uszkoreit�
 text6 ='''
 Anarchism is a political philosophy that advocates self-governed societies based on voluntary institutions. These are often described as stateless societies, although several authors have defined them more specifically as institutions based on non-hierarchical free associations. Anarchism holds the state to be undesirable, unnecessary and harmful'''
 
+t7 = '''Uszkoreit felt that self-attention could take on much bigger tasks. There’s another way to do this, he’d argue to anyone who would listen, and some who wouldn’t, outlining his vision on whiteboards in Building 1945, named after its address on Charleston Road on the northern edge of the Google campus.'''
+
+t8 = '''One day in 2016, Uszkoreit was having lunch in a Google café with a scientist named Illia Polosukhin. Born in Ukraine, Polosukhin had been at Google for nearly three years. He was assigned to the team providing answers to direct questions posed in the search field. It wasn’t going all that well. “To answer something on Google.com, you need something that’s very cheap and high-performing,” Polosukhin says. “Because you have milliseconds” to respond. When Polosukhin aired his complaints, Uszkoreit had no problem coming up with a remedy. “He suggested, why not use self-attention?” says Polosukhin.'''
+
+t9 = '''Polosukhin sometimes collaborated with a colleague named Ashish Vaswani. Born in India and raised mostly in the Middle East, he had gone to the University of Southern California to earn his doctorate in the school’s elite machine translation group. Afterward, he moved to Mountain View to join Google—specifically a newish organization called Google Brain. He describes Brain as “a radical group” that believed “neural networks were going to advance human understanding.” But he was still looking for a big project to work on. His team worked in Building 1965 next door to Polosukhin’s language team in 1945, and he heard about the self-attention idea. Could that be the project? He agreed to work on it.'''
+
+t10 = '''They had reached a plateau—until one day in 2017, when Noam Shazeer heard about their project, by accident. Shazeer was a veteran Googler—he’d joined the company in 2000—and an in-house legend, starting with his work on the company’s early ad system. Shazeer had been working on deep learning for five years and recently had become interested in large language models. But these models were nowhere close to producing the fluid conversations that he believed were possible.'''
+
 
 def get_hardcoded_texts():
-    return [text, text1, text2, text3, text4, text5]
+    return [text, text1, text2, text3, text4, text5, text6, t7, t8, t9, t10]
