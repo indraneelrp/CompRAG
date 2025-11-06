@@ -259,6 +259,9 @@ def clean_triplets(triplets):
             seen.add(triplet)
             cleaned.append((subj, rel, obj))
     
+    if len(cleaned) < 3:
+        return cleaned
+    
     # tf-idf based cleaning (clean based on frequent RELATIONS ie the r in s,r,o)
     relations = [c[1].lower() for c in cleaned]
     vectorizer = TfidfVectorizer(analyzer='word', lowercase=True)
