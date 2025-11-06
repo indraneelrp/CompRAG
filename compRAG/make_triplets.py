@@ -6,10 +6,13 @@ Make triplets given chunks
 '''
 import spacy
 from compRAG.text_samples import get_hardcoded_texts
+from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
+# from fastcoref import spacy_component
 
 # Load  model (make sure it's installed: python -m spacy download en_core_web_sm)
 nlp = spacy.load("en_core_web_sm")
-
+# nlp.add_pipe("fastcoref")
 
 def get_full_phrase(token, direction="both", max_depth=3):
     """Extract full noun phrases by following compound and modifier relationships."""
@@ -116,7 +119,7 @@ def extract_dependency_triplets(sent):
                     if obj_child.dep_ in ("dobj", "attr", "pcomp", "advmod"):
                         obj = get_full_phrase(obj_child)
                         if subject.strip() and obj.strip():
-                            triplets.append((subject.strip(), token.lemma_, obj.strip()))
+                            triplets.append((subject.strip(), token.text, obj.strip()))
     
     return triplets
 
@@ -146,7 +149,7 @@ def extract_question_triplets(sent):
         for subj in subjects:
             for obj in objects:
                 if subj.strip() and obj.strip():
-                    relation = verb.lemma_
+                    relation = verb.text
                     triplets.append((subj.strip(), relation, obj.strip()))
 
     # Extract prepositional relationships as separate triplets (e.g., "tutor of Alexander")
@@ -176,7 +179,7 @@ def extract_question_triplets(sent):
             for subj in rel_subjects:
                 for obj in rel_objects:
                     if subj.strip() and obj.strip():
-                        triplets.append((subj.strip(), token.lemma_, obj.strip()))
+                        triplets.append((subj.strip(), token.text, obj.strip()))
 
     return triplets
 
@@ -207,18 +210,18 @@ def extract_triplets(doc, is_query=False):
                 for subj in subjects:
                     for obj in objects:
                         if subj.strip() and obj.strip():
-                            relation = token.lemma_
+                            relation = token.text
                             triplets.append((subj.strip(), relation, obj.strip()))
             
             # Also look for copular constructions (is, was, etc.)
-            elif token.lemma_ in ("be", "have") and token.pos_ == "AUX":
+            elif token.text in ("be", "have") and token.pos_ == "AUX":
                 subjects = find_subjects(token)
                 objects = find_objects(token)
                 
                 for subj in subjects:
                     for obj in objects:
                         if subj.strip() and obj.strip():
-                            triplets.append((subj.strip(), token.lemma_, obj.strip()))
+                            triplets.append((subj.strip(), token.text, obj.strip()))
 
     if is_query:
         # Add entities
@@ -249,7 +252,6 @@ def clean_triplets(triplets):
             continue
         if any(char in subj + obj for char in ['*', '[', ']']):
             continue
-        
             
         # Normalize and deduplicate
         triplet = (subj.lower(), rel, obj.lower())
@@ -257,14 +259,29 @@ def clean_triplets(triplets):
             seen.add(triplet)
             cleaned.append((subj, rel, obj))
     
-    return cleaned
+    # tf-idf based cleaning (clean based on frequent RELATIONS ie the r in s,r,o)
+    relations = [c[1].lower() for c in cleaned]
+    vectorizer = TfidfVectorizer(analyzer='word', lowercase=True)
+    tfidf_matrix = vectorizer.fit_transform(relations)
+
+    avg_scores = tfidf_matrix.mean(axis=1).A1
+    threshold = np.percentile(avg_scores, 60)
+    key_triplets = [cleaned[i] for i, score in enumerate(avg_scores) if score >= threshold]
+
+    return key_triplets
+
+
+def resolve_coref_text(text: str) -> str:
+    """Resolve coreferences using fastcoref."""
+    doc = nlp(text, component_cfg={"fastcoref": {'resolve_text': True}})
+    return doc._.resolved_text
 
 
 def main_generate_triplets(nlp, text:str, is_query=False):
-    doc = nlp(text)
+    # resolved_text = resolve_coref_text(text)    # added coreference resolution code but kept disabled
+    doc = nlp(text)  
     
     triplets = extract_triplets(doc, is_query=is_query)
-
     return clean_triplets(triplets)
 
 
