@@ -15,6 +15,18 @@ from .HRR_pytorch import projection, binding, unbinding
 device = "cuda" if torch.cuda.is_available() else "cpu"
 EMBEDDING_MODEL = SentenceTransformer('all-MiniLM-L6-v2')   # dim 384 
 
+# Directional role vectors and seed
+HRR_DIM = 384 
+torch.manual_seed(42)
+
+# Role vectors
+R_SUBJ = projection(torch.randn(HRR_DIM, device=device), dim=-1)
+R_REL = projection(torch.randn(HRR_DIM, device=device), dim=-1)
+R_OBJ  = projection(torch.randn(HRR_DIM, device=device), dim=-1)
+
+def role_bind(base_vec: torch.Tensor, role_vec: torch.Tensor) -> torch.Tensor:
+    return binding(role_vec, base_vec, dim=-1) 
+
 def doc_triplets2embeddings(doc_triplets: list[list[tuple[str, str, str]]]) -> list[list[list[np.ndarray]]]:
     doc_triplets_embed = []
     for chunk_triplets in doc_triplets:
@@ -36,13 +48,17 @@ def doc_embeddings2hrr(doc_triplet_embeddings: list[list[list[Any]]])-> list[lis
             R_e = torch.from_numpy(R_e).float().to(device)
             y_e = torch.from_numpy(y_e).float().to(device)
 
-            x_hrr = projection(x_e, dim=-1)
-            R_hrr = projection(R_e, dim=-1)
-            y_hrr = projection(y_e, dim=-1)
+            x_p = projection(x_e, dim=-1)
+            R_p = projection(R_e, dim=-1)
+            y_p = projection(y_e, dim=-1)
 
-            b1 = binding(x_hrr, R_hrr, dim=-1)
-            b2 = binding(b1, y_hrr, dim=-1)
-            chunk_bound_vectors.append(b2)
+            hrr_subj = role_bind(x_p, R_SUBJ)
+            hrr_rel= role_bind(R_p, R_REL)
+            hrr_obj  = role_bind(y_p, R_OBJ)
+
+            H = hrr_subj + hrr_rel + hrr_obj    # superposition: choose to add rather than convolve 
+                                                # since adding vectors together makes it point to new meaning
+            chunk_bound_vectors.append(H)
         doc_hrr_vectors.append(chunk_bound_vectors)
     return doc_hrr_vectors
 
@@ -62,11 +78,14 @@ def chunk_embeddings2hrr(chunk_triplet_embeddings: list[list[Any]])-> list[torch
         R_e = torch.from_numpy(R_e).float().to(device)
         y_e = torch.from_numpy(y_e).float().to(device)
 
-        x_hrr = projection(x_e, dim=-1)
-        R_hrr = projection(R_e, dim=-1)
-        y_hrr = projection(y_e, dim=-1)
+        x_p = projection(x_e, dim=-1)
+        R_p = projection(R_e, dim=-1)
+        y_p = projection(y_e, dim=-1)
 
-        b1 = binding(x_hrr, R_hrr, dim=-1)
-        b2 = binding(b1, y_hrr, dim=-1)
-        chunk_hrr_vectors.append(b2)
+        hrr_subj = role_bind(x_p, R_SUBJ)
+        hrr_rel = role_bind(R_p, R_REL)
+        hrr_obj  = role_bind(y_p, R_OBJ)
+
+        H = hrr_subj + hrr_rel + hrr_obj        
+        chunk_hrr_vectors.append(H)
     return chunk_hrr_vectors

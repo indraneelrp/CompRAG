@@ -12,7 +12,7 @@ from compRAG.text_samples import get_hardcoded_texts
 
 def initialise_hnsw(dim: int, max_elems: int)-> hnswlib.Index:
     index = hnswlib.Index(space='cosine', dim=dim)
-    index.init_index(max_elements=max_elems, ef_construction=200, M=16)
+    index.init_index(max_elements=max_elems, ef_construction=300, M=16)
     return index
 
 def add_items(index: hnswlib.Index, 
@@ -92,7 +92,10 @@ if __name__ == "__main__":
     add_items(index, vecs, ids)
     print("--added items to hnsw index--")
 
-    q_txt = '''what was thing the team did differently in publishing their paper?'''
+    # q_txt = '''what was thing the team did differently in publishing their paper?'''
+    q_txt = '''how long did the team work before they had a breakthrough?'''
+    # q_txt = '''what was the university of southern california's group called where Vaswani earned his degree'''
+
 
 
     q_t = main_generate_triplets(nlp, q_txt)
@@ -108,8 +111,8 @@ if __name__ == "__main__":
         for query_hrr in q_t_hrr[0]:
             labels, distances = index.knn_query(query_hrr, k=2)
             print(labels)
-            # for d in distances[0]:
-            #     print(1 - d)
+            for d in distances[0]:
+                print(1 - d)
             for l in labels[0]:
                 print(id_to_t[l])    # print the exact triplet that matched
                 # print(id_to_chunk[l])   # print the entire chunk from where the matched triplet came
