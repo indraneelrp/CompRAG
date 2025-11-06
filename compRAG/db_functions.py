@@ -60,9 +60,11 @@ def init_db(db_path):
     c.execute('''
     CREATE TABLE IF NOT EXISTS hrr_vectors (
         hrr_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chunk_id TEXT,        
+        chunk_id TEXT,
+        triplet_id TEXT,        
         hrr_vector BLOB,              -- serialized HRR vector
-        FOREIGN KEY (chunk_id) REFERENCES chunks(id)
+        FOREIGN KEY (chunk_id) REFERENCES chunks(id),
+        FOREIGN KEY (triplet_id) REFERENCES triplets(id)
     )
     ''')
 
