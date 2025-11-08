@@ -82,18 +82,20 @@ if __name__ == "__main__":
     ids = []
     id_to_chunk = {}
     id_to_t = {}
+    id_to_hrr = {}
     for i, chunk_hrrs in enumerate(t_hrr, 0):
         for j, triplet_hrr in enumerate(chunk_hrrs, 0):
             vecs.append(triplet_hrr)
             ids.append((i+1)*10000+j)
             id_to_chunk[(i+1)*10000+j] = t[i]
             id_to_t[(i+1)*10000+j] = t[i][j]
+            id_to_hrr[(i+1)*10000+j] = triplet_hrr
     
     add_items(index, vecs, ids)
     print("--added items to hnsw index--")
 
     # q_txt = '''what was thing the team did differently in publishing their paper?'''
-    q_txt = '''how long did the team work before they had a breakthrough?'''
+    q_txt = '''What was the nationality of the wife of Henry Miller'''
     # q_txt = '''what was the university of southern california's group called where Vaswani earned his degree'''
 
 
@@ -109,10 +111,20 @@ if __name__ == "__main__":
     # print(len(q_t_hrr[0]))   # checking shape of q_t_hrr
     if len(q_t_hrr[0]) != 0:
         for query_hrr in q_t_hrr[0]:
-            labels, distances = index.knn_query(query_hrr, k=2)
-            print(labels)
+            labels, distances = index.knn_query(query_hrr, k=3)
+            # print(labels)
             for d in distances[0]:
                 print(1 - d)
             for l in labels[0]:
                 print(id_to_t[l])    # print the exact triplet that matched
                 # print(id_to_chunk[l])   # print the entire chunk from where the matched triplet came
+    
+            print("--NEXT LEVEL--")
+            for l2 in labels[0]:
+                print("l2: ", id_to_t[l2])
+                labels2, distances2 = index.knn_query(id_to_hrr[l2], k=6)
+                # print(labels)
+                for d2 in distances2[0]:
+                    print(1 - d2)
+                for l2 in labels2[0]:
+                    print(id_to_t[l2])    # print the exact triplet that matched
