@@ -214,7 +214,7 @@ def extract_triplets(doc, is_query=False):
                             triplets.append((subj.strip(), relation, obj.strip()))
             
             # Also look for copular constructions (is, was, etc.)
-            elif token.text in ("be", "have") and token.pos_ == "AUX":
+            elif token.lemma_ in ("be", "have") and token.pos_ == "AUX":
                 subjects = find_subjects(token)
                 objects = find_objects(token)
                 
@@ -261,17 +261,17 @@ def clean_triplets(triplets):
     
     if len(cleaned) < 3:
         return cleaned
-    
-    # tf-idf based cleaning (clean based on frequent RELATIONS ie the r in s,r,o)
-    relations = [c[1].lower() for c in cleaned]
-    vectorizer = TfidfVectorizer(analyzer='word', lowercase=True)
-    tfidf_matrix = vectorizer.fit_transform(relations)
+    return cleaned
+    # # tf-idf based cleaning (clean based on frequent RELATIONS ie the r in s,r,o)
+    # relations = [c[1].lower() for c in cleaned]
+    # vectorizer = TfidfVectorizer(analyzer='word', lowercase=True)
+    # tfidf_matrix = vectorizer.fit_transform(relations)
 
-    avg_scores = tfidf_matrix.mean(axis=1).A1
-    threshold = np.percentile(avg_scores, 60)
-    key_triplets = [cleaned[i] for i, score in enumerate(avg_scores) if score >= threshold]
+    # avg_scores = tfidf_matrix.mean(axis=1).A1
+    # threshold = np.percentile(avg_scores, 60)
+    # key_triplets = [cleaned[i] for i, score in enumerate(avg_scores) if score >= threshold]
 
-    return key_triplets
+    # return key_triplets
 
 
 def resolve_coref_text(text: str) -> str:

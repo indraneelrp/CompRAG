@@ -37,6 +37,15 @@ t9 = '''Polosukhin sometimes collaborated with a colleague named Ashish Vaswani.
 
 t10 = '''They had reached a plateau—until one day in 2017, when Noam Shazeer heard about their project, by accident. Shazeer was a veteran Googler—he’d joined the company in 2000—and an in-house legend, starting with his work on the company’s early ad system. Shazeer had been working on deep learning for five years and recently had become interested in large language models. But these models were nowhere close to producing the fluid conversations that he believed were possible.'''
 
+t11 = '''Moloch: or, This Gentile World is a semi-autobiographical novel written by Henry Miller in 1927-28, initially under the guise of a novel written by his wife, June.'''
+
+t12 = '''The book went unpublished until 1992, 65 years after it was written and 12 years after Miller’s death. It is widely considered to be of interest more as a study of Miller’s artistic growth than as a worthy piece of fiction.'''
+
+t13 = '''James Henry Miller (25 January 1915 , 22 October 1989), better known by his stage name Ewan MacColl, was an English folk singer, songwriter, communist, labour activist, actor, poet, playwright and record producer.'''
+
+t14 = '''Margaret Seeger (born June 17, 1935) is an American folksinger. She is also well known in Britain, where she has lived for more than 30 years. Margaret was married to the singer and songwriter Ewan MacColl until his death in 1989'''
+
+
 
 def get_hardcoded_texts():
-    return [text, text1, text2, text3, text4, text5, text6, t7, t8, t9, t10]
+    return [text, text1, text2, text3, text4, text5, text6, t7, t8, t9, t10, t11, t12, t13, t14]
