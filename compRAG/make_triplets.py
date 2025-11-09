@@ -261,17 +261,17 @@ def clean_triplets(triplets):
     
     if len(cleaned) < 3:
         return cleaned
-    return cleaned
-    # # tf-idf based cleaning (clean based on frequent RELATIONS ie the r in s,r,o)
-    # relations = [c[1].lower() for c in cleaned]
-    # vectorizer = TfidfVectorizer(analyzer='word', lowercase=True)
-    # tfidf_matrix = vectorizer.fit_transform(relations)
 
-    # avg_scores = tfidf_matrix.mean(axis=1).A1
-    # threshold = np.percentile(avg_scores, 60)
-    # key_triplets = [cleaned[i] for i, score in enumerate(avg_scores) if score >= threshold]
+    # tf-idf based cleaning (clean based on frequent RELATIONS ie the r in s,r,o)
+    relations = [c[1].lower() for c in cleaned]
+    vectorizer = TfidfVectorizer(analyzer='word', lowercase=True)
+    tfidf_matrix = vectorizer.fit_transform(relations)
 
-    # return key_triplets
+    avg_scores = tfidf_matrix.mean(axis=1).A1
+    threshold = np.percentile(avg_scores, 60)
+    key_triplets = [cleaned[i] for i, score in enumerate(avg_scores) if score >= threshold]
+
+    return key_triplets
 
 
 def resolve_coref_text(text: str) -> str:
