@@ -362,6 +362,124 @@ class HotpotQAEvaluator:
         
         return aggregated
     
+    def evaluate_from_predfile(self,
+                            pred_file: str,
+                            dataset: Any,
+                            k: int = 5,
+                            limit: int = None,
+                            verbose: bool = True) -> Dict[str, float]:
+        """
+        Evaluate using predictions stored in a file instead of calling a retriever.
+        Accepted formats:
+          - JSON Lines: each line is a JSON object with keys:
+                { "idx": int (optional), "retrieved_chunks": [ {id,title,text}, ... ] }
+            If "idx" is provided, it will be matched to dataset index. If not provided,
+            lines are assumed to be in the same order as the dataset.
+          - JSON list: a top-level list of the same objects as above.
+        """
+        # Load predictions
+        with open(pred_file, 'r') as f:
+            text = f.read().strip()
+            if not text:
+                raise ValueError(f"Empty prediction file: {pred_file}")
+            try:
+                # Try whole-file JSON (list)
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    # Single object -> wrap
+                    data = [data]
+            except json.JSONDecodeError:
+                # Fallback to JSONL
+                f.seek(0)
+                data = [json.loads(line) for line in f if line.strip()]
+        
+        # Build index -> retrieved_chunks mapping if idx present
+        indexed_map = {}
+        ordered_list = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            if 'idx' in entry:
+                try:
+                    indexed_map[int(entry['idx'])] = entry.get('retrieved_chunks', [])
+                except Exception:
+                    # skip malformed idx
+                    continue
+            else:
+                ordered_list.append(entry.get('retrieved_chunks', []))
+        
+        results = {
+            'recall@k': [],
+            'precision@k': [],
+            'multi_hop_coverage': [],
+            'mrr': [],
+            'latencies': []  # will be zeros since we don't measure retrieval here
+        }
+        
+        # Limit dataset if specified
+        if limit:
+            dataset = dataset.select(range(min(limit, len(dataset))))
+        
+        if verbose:
+            print(f"\nEvaluating from prediction file on {len(dataset)} examples...")
+        
+        for i, example in enumerate(dataset):
+            if verbose and (i + 1) % 10 == 0:
+                print(f"Processed {i + 1}/{len(dataset)} examples...")
+            
+            # Determine retrieved chunks for this example
+            if i in indexed_map:
+                retrieved = indexed_map[i]
+            elif len(ordered_list) > i:
+                retrieved = ordered_list[i]
+            else:
+                retrieved = []
+            
+            # Ensure each retrieved item is a dict with id/title/text
+            # If stored as strings, attempt to wrap as text-only chunk
+            normalized_retrieved = []
+            for item in retrieved:
+                if isinstance(item, str):
+                    normalized_retrieved.append({'id': None, 'title': '', 'text': item})
+                elif isinstance(item, dict):
+                    normalized_retrieved.append({
+                        'id': item.get('id'),
+                        'title': item.get('title'),
+                        'text': item.get('text') or item.get('context') or ''
+                    })
+            
+            supporting_facts = example.get('supporting_facts', [])
+            
+            # Compute metrics (latency 0.0)
+            recall = self.compute_recall_at_k(normalized_retrieved, supporting_facts)
+            precision = self.compute_precision_at_k(normalized_retrieved, supporting_facts)
+            multi_hop = self.compute_multi_hop_coverage(normalized_retrieved, supporting_facts)
+            mrr = self.compute_mrr(normalized_retrieved, supporting_facts)
+            
+            results['recall@k'].append(recall)
+            results['precision@k'].append(precision)
+            results['multi_hop_coverage'].append(multi_hop)
+            results['mrr'].append(mrr)
+            results['latencies'].append(0.0)
+        
+        aggregated = {
+            f'Recall@{k}': np.mean(results['recall@k']) if results['recall@k'] else 0.0,
+            f'Precision@{k}': np.mean(results['precision@k']) if results['precision@k'] else 0.0,
+            'Multi-Hop Coverage': np.mean(results['multi_hop_coverage']) if results['multi_hop_coverage'] else 0.0,
+            'MRR': np.mean(results['mrr']) if results['mrr'] else 0.0,
+            'Avg Latency (ms)': np.mean(results['latencies']) * 1000 if results['latencies'] else 0.0
+        }
+        
+        if verbose:
+            print("\n" + "="*60)
+            print("EVALUATION RESULTS (from pred file)")
+            print("="*60)
+            for metric, value in aggregated.items():
+                print(f"{metric:25s}: {value:.4f}")
+            print("="*60)
+        
+        return aggregated
+    
     def compare_retrievers(self, 
                           retrievers: Dict[str, Any],
                           dataset: Any,
@@ -495,7 +613,24 @@ def main():
     # Initialize evaluator
     evaluator = HotpotQAEvaluator()
     
-    # Initialize retrievers
+    # If PRED_FILE env var is set, evaluate using that file
+    pred_file = os.getenv("PRED_FILE")
+    if pred_file:
+        print(f"\nUsing prediction file: {pred_file}")
+        results = evaluator.evaluate_from_predfile(
+            pred_file=pred_file,
+            dataset=dataset,
+            k=5,
+            limit=10,  # adjust as needed
+            verbose=True
+        )
+        output_file = 'evaluation_results_from_preds.json'
+        with open(output_file, 'w') as f:
+            json.dump({'PredFile': results}, f, indent=2)
+        print(f"\n✅ Results saved to {output_file}")
+        return
+    
+    # ...existing code...
     print("\nInitializing retrievers...")
     
     # Baseline: Top-K
@@ -524,6 +659,50 @@ def main():
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"\n✅ Results saved to {output_file}")
+
+
+if __name__ == "__main__":
+    main()
+
+# def main():
+#     """Main evaluation script"""
+    
+#     # Load HotpotQA dev set (distractor setting) - this is correct!
+#     print("Loading HotpotQA dataset...")
+#     dataset = load_dataset("hotpot_qa", "distractor", split="validation")
+    
+#     # Initialize evaluator
+#     evaluator = HotpotQAEvaluator()
+    
+#     # Initialize retrievers
+#     print("\nInitializing retrievers...")
+    
+#     # Baseline: Top-K
+#     baseline_retriever = TopKRetriever()
+#     baseline_retriever.build_index()
+    
+#     # CompRAG system
+#     comprag_retriever = CompRAGRetriever()
+    
+#     retrievers = {
+#         'Baseline (Top-K)': baseline_retriever,
+#         'CompRAG (Triple-HRR)': comprag_retriever,
+#     }
+    
+#     # Run evaluation
+#     print("\nStarting evaluation...")
+#     results = evaluator.compare_retrievers(
+#         retrievers=retrievers,
+#         dataset=dataset,
+#         k=5,
+#         limit=10  # Start very small for testing
+#     )
+    
+#     # Save results
+#     output_file = 'evaluation_results.json'
+#     with open(output_file, 'w') as f:
+#         json.dump(results, f, indent=2)
+#     print(f"\n✅ Results saved to {output_file}")
 
 # def main():
 #     """Main evaluation script"""
@@ -569,7 +748,3 @@ def main():
 #     with open(output_file, 'w') as f:
 #         json.dump(results, f, indent=2)
 #     print(f"\n✅ Results saved to {output_file}")
-
-
-if __name__ == "__main__":
-    main()
