@@ -29,12 +29,13 @@ from typing import List, Tuple, Dict, Set, Optional
 from dotenv import load_dotenv
 import spacy
 import time 
+import argparse
 
 # Import your CompRAG modules
 from compRAG.db_functions import init_db, process_dataset, get_all_hrr_vectors
 from compRAG.make_triplets import main_generate_triplets  
 from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
-from compRAG.retrieve import initialise_hnsw, add_items
+from compRAG.retrieve import initialise_hnsw, add_items, local_similarity_graph_match
 
 load_dotenv()
 
@@ -42,7 +43,7 @@ load_dotenv()
 class CompRAGSystem:
     """Main CompRAG system orchestrator"""
     
-    def __init__(self, db_path: str = "", ollama_url: str = "http://localhost:11434/api/generate"):
+    def __init__(self, db_path: str = "", ollama_url: str = "http://localhost:11434/api/generate", args=None):
         """
         TODO Phase 1: Initialize system
         - Set db_path and ollama_url
@@ -55,7 +56,8 @@ class CompRAGSystem:
         self.ollama_url = ollama_url
         self.conn = sqlite3.connect(self.db_path)
         self.index = None
-        self.id_to_chunk = {}
+        self.hrr_id_to_embedding = {}
+        self.args = args or argparse.Namespace()
 
         self.dim = 384  
         self.max_elements = 100000
@@ -70,7 +72,6 @@ class CompRAGSystem:
         except Exception as e:
             raise RuntimeError("Failed to load SpaCy model. Ensure 'en_core_web_sm' is installed.") from e
         
-        self.index = None  # HNSW search index
         self.vector_to_chunk = {}  # Maps vector IDs to chunk IDs
         self.is_index_built = False
 
@@ -135,6 +136,7 @@ class CompRAGSystem:
             vector_ids.append(hrr_id)
             
             self.vector_to_chunk[hrr_id] = chunk_id
+            self.hrr_id_to_embedding[hrr_id] = hrr_vector
         
         print("Initializing HNSW index...")
         self.index = initialise_hnsw(dim, max_elements)
@@ -509,7 +511,22 @@ class CompRAGSystem:
             
             # Step 3: Search for similar chunks
             print("\n🔍 Step 3: Searching for similar chunks...")
-            chunk_ids = self.retrieve_similar_chunks(hrr_vectors, k=k)
+            chunk_ids = set()
+            if self.args.graph and self.index != None:
+                label_list = local_similarity_graph_match(
+                    hrr_vectors, 
+                    self.index, 
+                    self.hrr_id_to_embedding, 
+                    depth=2, 
+                    seed_k=5, 
+                    branching_k=4
+                )
+                for hrr_id in label_list:
+                    if hrr_id in self.vector_to_chunk:
+                        chunk_id = self.vector_to_chunk[hrr_id]
+                        chunk_ids.add(chunk_id)
+            else: 
+                chunk_ids = self.retrieve_similar_chunks(hrr_vectors, k=k)
             
             if not chunk_ids:
                 return {
@@ -556,7 +573,10 @@ class CompRAGSystem:
             print(f"\n✅ QUERY PROCESSING COMPLETE")
             print(f"   ⏱️  Processing time: {processing_time:.2f} seconds")
             print(f"   🔗 Triplets extracted: {len(triplets)}")
-            print(f"   📄 Documents retrieved: {len(contexts)}")
+            if self.args.see_chunks:
+                print(f"   📄 Documents retrieved: {contexts}")
+            else:
+                print(f"   📄 Documents retrieved: {len(contexts)}")
             print(f"   📝 Response length: {len(response)} characters")
             
             return result
@@ -595,8 +615,22 @@ def main():
     - Test with sample queries
     - Run interactive_mode()
     """
+    # -- COMMAND LINE ARGUMENTS PROCESSING -- 
+    parser = argparse.ArgumentParser(description="Run CompRAG system with optional modes.")
+    parser.add_argument(
+        "--graph", 
+        action="store_true",
+        help="Build a local graph based on triplet similarity to grab additional related context."
+    )
+    parser.add_argument(
+        "--see_chunks", 
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    # -- MAIN COMPRAG RUN --
     # Initialize the system
-    compRAG = CompRAGSystem()
+    compRAG = CompRAGSystem(args=args)
 
     # Step 1: Set up database with a small subset for testing
     # compRAG.setup_database(limit=10)  # Only process 10 chunks for quick testing
@@ -605,7 +639,7 @@ def main():
     compRAG.build_search_index(dim=384, max_elements=100000)
 
     # Step 3: Run a test query
-    test_query = "Who was the tutor of Alexander the Great which made him the man he was?"
+    test_query = "Who was Henry Miller and where did he live?"
     result = compRAG.answer_query(test_query, k=3)  # Retrieve top 3 chunks
 
     print("\n=== TEST QUERY RESULT ===")

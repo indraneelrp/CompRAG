@@ -8,6 +8,7 @@ from .make_triplets import main_generate_triplets, main_generate_triplets_from_l
 from .encode import doc_triplets2embeddings, doc_embeddings2hrr
 from typing import Sequence
 from compRAG.text_samples import get_hardcoded_texts
+from collections import deque
 
 
 def initialise_hnsw(dim: int, max_elems: int)-> hnswlib.Index:
@@ -36,6 +37,37 @@ def get_nearest_triplet_ids(query_hrrs: list[torch.Tensor], index: hnswlib.Index
         labels, distances = index.knn_query(query_hrr.reshape(1, -1), k=k)
         matched_triplet_ids.extend(labels[0].tolist()) # labels[0] bcause shape of labels is [[l1, l2,...]]
     return matched_triplet_ids
+
+def local_similarity_graph_match(
+        query_hrr_vectors: list[np.ndarray], 
+        index: hnswlib.Index, 
+        label_to_embedding: dict,
+        depth=2, 
+        seed_k=2, 
+        branching_k=5
+    ):
+    q = deque([])    # BFS queue
+    visited = set()
+    
+    for query_vector in query_hrr_vectors:
+        query_vec_reshaped = query_vector.reshape(1, -1)
+        labels, _ = index.knn_query(query_vec_reshaped, k=seed_k)
+        for l in labels[0]:
+            visited.add(l)
+            q.append((l, 0))
+    
+    while (len(q) > 0):
+        curr_label, curr_d = q.popleft()
+
+        if curr_d < depth:
+            next_query_vec = label_to_embedding[curr_label].reshape(1, -1)
+            labels, distances = index.knn_query(next_query_vec, k=branching_k)
+            
+            for l in labels[0]:
+                if l not in visited:
+                    visited.add(l)
+                    q.append((l, curr_d+1))
+    return list(visited)   
 
 def test_top_k_hardcoded():
     print("===========\ncheck top-k\n----------")
@@ -97,7 +129,6 @@ if __name__ == "__main__":
     # q_txt = '''what was thing the team did differently in publishing their paper?'''
     q_txt = '''What was the nationality of the wife of Henry Miller'''
     # q_txt = '''what was the university of southern california's group called where Vaswani earned his degree'''
-
 
 
     q_t = main_generate_triplets(nlp, q_txt)
