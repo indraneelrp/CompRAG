@@ -26,7 +26,7 @@ def init_system(use_graph):
     # Create args namespace for CompRAGSystem
     args = argparse.Namespace(graph=use_graph, see_chunks=False)
 
-    # Initialize CompRAG system (reuses existing database and index building logic)
+    # Initialize CompRAG system
     comprag_system = CompRAGSystem(args=args)
     comprag_system.build_search_index(dim=384, max_elements=1000000)
 
@@ -147,12 +147,12 @@ def process_question(item, k=10, use_graph=False, graph_params=None):
                     if chunk_id.startswith(f"{question_id}_chunk"):
                         chunk_ids.add(chunk_id)
         else:
-            # Use baseline retrieval from CompRAGSystem
+            # Use baseline retrieval
             all_chunk_ids = comprag_system.retrieve_similar_chunks(query_hrr_vectors, k=k)
             # Filter to only this question's chunks
             chunk_ids = set(cid for cid in all_chunk_ids if cid.startswith(f"{question_id}_chunk"))
 
-        # Get chunk contexts using CompRAGSystem method
+        # Get chunk contexts
         contexts = comprag_system.get_chunk_contexts(chunk_ids)
 
         # Generate answer using HuggingFace
@@ -199,7 +199,7 @@ def generate_predictions(eval_file, output_file, k=10, use_graph=False, graph_pa
 
     print()
 
-    # Initialize system (calls CompRAGSystem and loads HF model)
+    # Initialize system
     init_system(use_graph)
 
     # Process questions sequentially
