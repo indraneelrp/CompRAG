@@ -1,42 +1,35 @@
-import sqlite3
 import ujson as json
-import numpy as np
 import torch
 from tqdm import tqdm
 from dotenv import load_dotenv
 import os
 import sys
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import argparse
 
 sys.path.insert(0, os.path.abspath('.'))
-
-from compRAG.make_triplets import main_generate_triplets
-from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
-from compRAG.retrieve import initialise_hnsw, add_items, local_similarity_graph_match
-import spacy
+from main import CompRAGSystem
 
 load_dotenv()
-db_path = os.getenv("HOTPOT_DB")
 
 # Global variables
-nlp = None
-conn = None
 model = None
 tokenizer = None
-index = None
-hrr_id_to_embedding = {}
-vector_to_chunk = {}
+comprag_system = None
 
-def init_worker(use_graph):
-    """Initialize per-worker resources"""
-    global nlp, conn, model, tokenizer, index, hrr_id_to_embedding, vector_to_chunk
-    
-    print(f"Initializing worker (PID: {os.getpid()})...")
-    
-    # Load spaCy
-    nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
-    conn = sqlite3.connect(db_path)
-    
+def init_system(use_graph):
+    """Initialize CompRAG system and HuggingFace model"""
+    global model, tokenizer, comprag_system
+
+    print(f"Initializing system...")
+
+    # Create args namespace for CompRAGSystem
+    args = argparse.Namespace(graph=use_graph, see_chunks=False)
+
+    # Initialize CompRAG system (reuses existing database and index building logic)
+    comprag_system = CompRAGSystem(args=args)
+    comprag_system.build_search_index(dim=384, max_elements=1000000)
+
     # Load HuggingFace model
     print("Loading HuggingFace model (flan-t5-base)...")
     model_name = "google/flan-t5-base"
@@ -48,177 +41,20 @@ def init_worker(use_graph):
     )
     model.eval()
     print("Model loaded")
-    
-    # Build HNSW index if using graph retrieval
-    if use_graph:
-        print("Building HNSW index for graph retrieval...")
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT hrr_id, chunk_id, hrr_vector 
-            FROM hrr_vectors 
-            WHERE hrr_vector IS NOT NULL
-        """)
-        hrr_data = cursor.fetchall()
-        
-        if not hrr_data:
-            raise RuntimeError("No HRR vectors found in database")
-        
-        vectors = []
-        vector_ids = []
-        hrr_id_to_embedding = {}
-        vector_to_chunk = {}
-        
-        for hrr_id, chunk_id, hrr_blob in hrr_data:
-            hrr_vector = np.frombuffer(hrr_blob, dtype=np.float32)
-            vectors.append(hrr_vector)
-            vector_ids.append(hrr_id)
-            hrr_id_to_embedding[hrr_id] = hrr_vector
-            vector_to_chunk[hrr_id] = chunk_id
-        
-        # Use function from retrieve.py
-        index = initialise_hnsw(dim=384, max_elems=len(vectors))
-        add_items(index, vectors, vector_ids)
-        
-        print(f"Index built with {len(vectors)} vectors")
-    else:
-        index = None
-
-def retrieve_chunks_baseline(query, question_id, k=10):
-    """Baseline retrieval: Top-k similarity within question's chunks"""
-    global nlp, conn
-    
-    # Extract query triplets
-    query_triplets = main_generate_triplets(nlp, query)
-    if not query_triplets:
-        return []
-    
-    # Encode query
-    query_embeddings = chunk_triplets2embeddings(query_triplets)
-    query_hrrs = chunk_embeddings2hrr(query_embeddings)
-    
-    query_hrr_list = []
-    for hrr in query_hrrs:
-        if isinstance(hrr, torch.Tensor):
-            hrr = hrr.cpu().numpy()
-        query_hrr_list.append(hrr)
-    
-    if not query_hrr_list:
-        return []
-    
-    query_hrr = np.mean(query_hrr_list, axis=0)
-    
-    # Search chunks for this question
-    c = conn.cursor()
-    c.execute("""
-        SELECT chunk_id, hrr_vector 
-        FROM hrr_vectors 
-        WHERE chunk_id LIKE ?
-    """, (f"{question_id}_chunk%",))
-    
-    similarities = []
-    for row in c.fetchall():
-        chunk_id, hrr_blob = row
-        chunk_hrr = np.frombuffer(hrr_blob, dtype=np.float32)
-        
-        norm_query = np.linalg.norm(query_hrr)
-        norm_chunk = np.linalg.norm(chunk_hrr)
-        
-        if norm_query > 0 and norm_chunk > 0:
-            sim = np.dot(query_hrr, chunk_hrr) / (norm_query * norm_chunk)
-            similarities.append((chunk_id, float(sim)))
-    
-    if not similarities:
-        return []
-    
-    similarities.sort(key=lambda x: x[1], reverse=True)
-    top_chunk_ids = [chunk_id for chunk_id, _ in similarities[:k]]
-    
-    # Fetch chunk details
-    chunks = []
-    for chunk_id in top_chunk_ids:
-        c.execute("SELECT id, title, text FROM chunks WHERE id=?", (chunk_id,))
-        row = c.fetchone()
-        if row:
-            chunks.append({
-                'id': row[0],
-                'title': row[1],
-                'text': row[2]
-            })
-    
-    return chunks
-
-def retrieve_chunks_graph(query, question_id, depth=2, seed_k=10, branching_k=4):
-    """Graph-based retrieval: BFS on similarity graph using retrieve.py"""
-    global nlp, conn, index, hrr_id_to_embedding, vector_to_chunk
-    
-    # Extract query triplets
-    query_triplets = main_generate_triplets(nlp, query)
-    if not query_triplets:
-        return []
-    
-    # Encode query
-    query_embeddings = chunk_triplets2embeddings(query_triplets)
-    query_hrrs = chunk_embeddings2hrr(query_embeddings)
-    
-    query_hrr_list = []
-    for hrr in query_hrrs:
-        if isinstance(hrr, torch.Tensor):
-            hrr = hrr.cpu().numpy()
-        query_hrr_list.append(hrr)
-    
-    if not query_hrr_list:
-        return []
-    
-    # Use function from retrieve.py
-    hrr_ids = local_similarity_graph_match(
-        query_hrr_vectors=query_hrr_list,
-        index=index,
-        label_to_embedding=hrr_id_to_embedding,
-        depth=depth,
-        seed_k=seed_k,
-        branching_k=branching_k
-    )
-    
-    # Map to chunk IDs
-    chunk_ids = set()
-    for hrr_id in hrr_ids:
-        if hrr_id in vector_to_chunk:
-            chunk_ids.add(vector_to_chunk[hrr_id])
-    
-    # Filter to only this question's chunks
-    question_chunk_ids = [cid for cid in chunk_ids if cid.startswith(f"{question_id}_chunk")]
-    
-    if not question_chunk_ids:
-        return []
-    
-    # Fetch chunk details
-    c = conn.cursor()
-    chunks = []
-    for chunk_id in question_chunk_ids:
-        c.execute("SELECT id, title, text FROM chunks WHERE id=?", (chunk_id,))
-        row = c.fetchone()
-        if row:
-            chunks.append({
-                'id': row[0],
-                'title': row[1],
-                'text': row[2]
-            })
-    
-    return chunks
 
 def generate_answer_hf(query, chunks, max_length=100):
     """Generate answer using HuggingFace model"""
     global model, tokenizer
-    
+
     if not chunks:
         return "No relevant information found."
-    
+
     # Use top 3 chunks, truncate text
     context = "\n\n".join([
         f"[{i+1}] {chunk['title']}: {chunk['text'][:500]}"
         for i, chunk in enumerate(chunks[:3])
     ])
-    
+
     prompt = f"""Answer the question based on the documents.
 
 Documents:
@@ -233,11 +69,11 @@ Instructions:
 - Keep answer to 1-2 sentences
 
 Answer:"""
-    
+
     try:
         inputs = tokenizer(prompt, return_tensors="pt", max_length=1024, truncation=True)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
-        
+
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
@@ -246,46 +82,92 @@ Answer:"""
                 early_stopping=True,
                 temperature=0.7
             )
-        
+
         answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
         return answer.strip()
-    
+
     except Exception as e:
         return f"Error: {str(e)}"
 
 def process_question(item, k=10, use_graph=False, graph_params=None):
-    """Process a single question"""
+    """Process a single question using CompRAGSystem"""
+    global comprag_system
+
     question_id = item['id']
     question = item['question']
     gold_answer = item['answer']
-    
+
     try:
-        # Retrieve chunks based on mode
+        query_triplets = comprag_system.process_query(question)
+
+        if not query_triplets:
+            return {
+                'id': question_id,
+                'question': question,
+                'predicted_answer': "",
+                'gold_answer': gold_answer,
+                'num_chunks_retrieved': 0,
+                'retrieved_titles': [],
+                'retrieval_method': 'graph' if use_graph else 'baseline'
+            }
+
+        # Convert to HRR vectors
+        query_hrr_vectors = comprag_system.query_to_hrr_vectors(query_triplets)
+
+        if not query_hrr_vectors:
+            return {
+                'id': question_id,
+                'question': question,
+                'predicted_answer': "",
+                'gold_answer': gold_answer,
+                'num_chunks_retrieved': 0,
+                'retrieved_titles': [],
+                'retrieval_method': 'graph' if use_graph else 'baseline'
+            }
+
+        # Retrieve chunks
         if use_graph:
+            from compRAG.retrieve import local_similarity_graph_match
             params = graph_params or {'depth': 2, 'seed_k': 10, 'branching_k': 4}
-            chunks = retrieve_chunks_graph(
-                question, 
-                question_id, 
+
+            label_list = local_similarity_graph_match(
+                query_hrr_vectors,
+                comprag_system.index,
+                comprag_system.hrr_id_to_embedding,
                 depth=params['depth'],
                 seed_k=params['seed_k'],
                 branching_k=params['branching_k']
             )
+
+            chunk_ids = set()
+            for hrr_id in label_list:
+                if hrr_id in comprag_system.vector_to_chunk:
+                    chunk_id = comprag_system.vector_to_chunk[hrr_id]
+                    # Filter to only this question's chunks
+                    if chunk_id.startswith(f"{question_id}_chunk"):
+                        chunk_ids.add(chunk_id)
         else:
-            chunks = retrieve_chunks_baseline(question, question_id, k=k)
-        
-        # Generate answer
-        predicted_answer = generate_answer_hf(question, chunks)
-        
+            # Use baseline retrieval from CompRAGSystem
+            all_chunk_ids = comprag_system.retrieve_similar_chunks(query_hrr_vectors, k=k)
+            # Filter to only this question's chunks
+            chunk_ids = set(cid for cid in all_chunk_ids if cid.startswith(f"{question_id}_chunk"))
+
+        # Get chunk contexts using CompRAGSystem method
+        contexts = comprag_system.get_chunk_contexts(chunk_ids)
+
+        # Generate answer using HuggingFace
+        predicted_answer = generate_answer_hf(question, contexts)
+
         return {
             'id': question_id,
             'question': question,
             'predicted_answer': predicted_answer,
             'gold_answer': gold_answer,
-            'num_chunks_retrieved': len(chunks),
-            'retrieved_titles': [c['title'] for c in chunks],
+            'num_chunks_retrieved': len(contexts),
+            'retrieved_titles': [c['title'] for c in contexts],
             'retrieval_method': 'graph' if use_graph else 'baseline'
         }
-    
+
     except Exception as e:
         return {
             'id': question_id,
@@ -297,46 +179,46 @@ def process_question(item, k=10, use_graph=False, graph_params=None):
         }
 
 def generate_predictions(eval_file, output_file, k=10, use_graph=False, graph_params=None):
-    """Generate predictions (single process due to GPU constraints)"""
-    
+    """Generate predictions using CompRAGSystem"""
+
     # Load questions
     print(f"Loading questions from {eval_file}...")
     with open(eval_file) as f:
         eval_data = json.load(f)
-    
+
     print(f"Total questions: {len(eval_data)}")
-    
+
     mode = "GRAPH" if use_graph else "BASELINE"
     print(f"Mode: {mode}")
-    
+
     if use_graph:
         params = graph_params or {'depth': 2, 'seed_k': 10, 'branching_k': 4}
         print(f"Graph parameters: depth={params['depth']}, seed_k={params['seed_k']}, branching_k={params['branching_k']}")
     else:
         print(f"Retrieving top-{k} chunks per question")
-    
+
     print()
-    
-    # Initialize resources
-    init_worker(use_graph)
-    
+
+    # Initialize system (calls CompRAGSystem and loads HF model)
+    init_system(use_graph)
+
     # Process questions sequentially
     predictions = []
     for item in tqdm(eval_data, desc="Processing questions"):
         pred = process_question(item, k=k, use_graph=use_graph, graph_params=graph_params)
         predictions.append(pred)
-    
+
     # Save predictions
     with open(output_file, 'w') as f:
         json.dump(predictions, f, indent=2)
-    
+
     print(f"\n✓ Saved {len(predictions)} predictions to {output_file}")
-    
+
     # Quick stats
     errors = sum(1 for p in predictions if 'error' in p)
     print(f"Successful: {len(predictions) - errors}")
     print(f"Errors: {errors}")
-    
+
     return predictions
 
 if __name__ == "__main__":
