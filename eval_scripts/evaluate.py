@@ -107,8 +107,8 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python evaluate_simple.py <predictions_file>")
-        print("Example: python evaluate_simple.py predictions.json")
+        print("Usage: python evaluate.py <predictions_file>")
+        print("Example: python evaluate.py predictions.json")
         sys.exit(1)
     
     evaluate_predictions(sys.argv[1])
