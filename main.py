@@ -162,7 +162,7 @@ class CompRAGSystem:
             return []
         
         try:
-            triplets = main_generate_triplets(self.nlp, query.strip())
+            triplets = main_generate_triplets(self.nlp, query.strip(), is_query=True)
             
             if triplets:
                 print(f"✅ Extracted {len(triplets)} triplets")

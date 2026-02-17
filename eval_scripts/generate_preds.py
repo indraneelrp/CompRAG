@@ -51,22 +51,16 @@ def generate_answer_hf(query, chunks, max_length=100):
 
     # Use top 3 chunks, truncate text
     context = "\n\n".join([
-        f"[{i+1}] {chunk['title']}: {chunk['text'][:500]}"
-        for i, chunk in enumerate(chunks[:3])
+        f"[{i+1}] {chunk['title']}: {chunk['text'][:800]}"
+        for i, chunk in enumerate(chunks[:5])
     ])
 
-    prompt = f"""Answer the question based on the documents.
+    prompt = f"""Answer the question using only the information from the documents below.
 
 Documents:
 {context}
 
 Question: {query}
-
-Instructions:
-- Answer directly and concisely
-- For yes/no questions, respond with just "yes" or "no"
-- Use only information from the documents
-- Keep answer to 1-2 sentences
 
 Answer:"""
 
@@ -78,9 +72,9 @@ Answer:"""
             outputs = model.generate(
                 **inputs,
                 max_length=max_length,
-                num_beams=2,
+                num_beams=4,
                 early_stopping=True,
-                temperature=0.7
+                do_sample=False
             )
 
         answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -143,15 +137,12 @@ def process_question(item, k=10, use_graph=False, graph_params=None):
             for hrr_id in label_list:
                 if hrr_id in comprag_system.vector_to_chunk:
                     chunk_id = comprag_system.vector_to_chunk[hrr_id]
-                    # Filter to only this question's chunks
-                    if chunk_id.startswith(f"{question_id}_chunk"):
-                        chunk_ids.add(chunk_id)
+                    chunk_ids.add(chunk_id)
+
         else:
             # Use baseline retrieval
             all_chunk_ids = comprag_system.retrieve_similar_chunks(query_hrr_vectors, k=k)
-            # Filter to only this question's chunks
-            chunk_ids = set(cid for cid in all_chunk_ids if cid.startswith(f"{question_id}_chunk"))
-
+            chunk_ids = set(all_chunk_ids)
         # Get chunk contexts
         contexts = comprag_system.get_chunk_contexts(chunk_ids)
 
