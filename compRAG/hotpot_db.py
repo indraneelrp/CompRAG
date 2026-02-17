@@ -3,7 +3,6 @@ from compRAG.make_triplets import main_generate_triplets
 from compRAG.encode import chunk_triplets2embeddings, chunk_embeddings2hrr
 import spacy
 from datasets import load_dataset
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dotenv import load_dotenv
 import os
 import numpy as np
@@ -94,31 +93,24 @@ def chunk_text(text, chunk_size=500):
 # para_text = 'Echosmith is... They are best known...'
 # chunk3: title='Echosmith', text='Echosmith is...'
 
-_worker_nlp = None
 
-def _init_worker():
-    """Initialize spaCy model once per worker"""
-    global _worker_nlp
-    if _worker_nlp is None:
-        _worker_nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
-
-def process_example_no_embeddings(example, chunk_size=500):
+def process_example_no_embeddings(example, chunk_size=500, nlp=None):
     """Extract triplets only - no embeddings yet"""
     question_id = example['id']
     titles = example['context']['title']
     paragraphs = example['context']['sentences']
-    
+
     results = []
     chunk_counter = 0
-    
+
     for title, sentences in zip(titles, paragraphs):
         para_text = ' '.join(sentences)
         chunks = chunk_text(para_text, chunk_size)
-        
+
         for chunk in chunks:
             chunk_id = f"{question_id}_chunk{chunk_counter}"
             chunk_counter += 1
-            triplets = main_generate_triplets(_worker_nlp, chunk)
+            triplets = main_generate_triplets(nlp, chunk)
             
             results.append({
                 'chunk_id': chunk_id,
@@ -213,8 +205,8 @@ def get_processed_ids(conn):
     c.execute("SELECT DISTINCT substr(id, 1, instr(id, '_chunk')-1) FROM chunks WHERE id LIKE '%_chunk%'")
     return set(row[0] for row in c.fetchall() if row[0])
 
-def process_dataset(split="validation", limit=None, chunk_size=500, 
-                   batch_size=500, num_workers=8, encoding_batch=128):
+def process_dataset(split="validation", limit=None, chunk_size=500,
+                   batch_size=500, encoding_batch=128):
     from tqdm import tqdm
     
     ds = load_dataset("hotpotqa/hotpot_qa", "fullwiki")[split]
@@ -236,22 +228,19 @@ def process_dataset(split="validation", limit=None, chunk_size=500,
     print(f"Processing {len(to_process)}/{total} examples ({len(processed_ids)} already done)")
     
     all_results = []
-    
-    # Stage 1: Parallel triplet extraction (CPU-bound)
-    print("Stage 1: Extracting triplets in parallel...")
-    with ProcessPoolExecutor(max_workers=num_workers, initializer=_init_worker) as executor:
-        futures = {executor.submit(process_example_no_embeddings, ex, chunk_size): ex['id'] 
-                   for ex in to_process}
-        
-        with tqdm(total=len(to_process), desc="Extracting triplets") as pbar:
-            for future in as_completed(futures):
-                try:
-                    results = future.result()
-                    all_results.extend(results)
-                    pbar.update(1)
-                except Exception as e:
-                    print(f"Error: {e}")
-                    pbar.update(1)
+    nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
+
+    # Stage 1: Sequential triplet extraction
+    # ProcessPoolExecutor cannot be used here because REBEL is a CUDA model and
+    # CUDA contexts cannot be safely forked into child processes.
+    print("Stage 1: Extracting triplets (sequential, REBEL)...")
+    from tqdm import tqdm as _tqdm
+    for ex in _tqdm(to_process, desc="Extracting triplets"):
+        try:
+            results = process_example_no_embeddings(ex, chunk_size, nlp)
+            all_results.extend(results)
+        except Exception as e:
+            print(f"Error processing {ex['id']}: {e}")
     
     # Stage 2: Batch encode HRRs (single-threaded but batched for model efficiency)
     print(f"Stage 2: Encoding {len(all_results)} chunks in batches of {encoding_batch}...")
@@ -307,7 +296,7 @@ if __name__ == "__main__":
     
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         print("Testing with 10 examples, 300 char chunks...")
-        process_dataset(limit=10, chunk_size=300, batch_size=50, num_workers=4, encoding_batch=32)
+        process_dataset(limit=10, chunk_size=300, batch_size=50, encoding_batch=32)
     else:
         # For full run, use larger batches
-        process_dataset(limit=None, chunk_size=500, batch_size=1000, num_workers=1, encoding_batch=256)
+        process_dataset(limit=None, chunk_size=500, batch_size=1000, encoding_batch=256)
