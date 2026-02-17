@@ -310,4 +310,4 @@ if __name__ == "__main__":
         process_dataset(limit=10, chunk_size=300, batch_size=50, num_workers=4, encoding_batch=32)
     else:
         # For full run, use larger batches
-        process_dataset(limit=None, chunk_size=500, batch_size=1000, num_workers=8, encoding_batch=256)
+        process_dataset(limit=None, chunk_size=500, batch_size=1000, num_workers=1, encoding_batch=256)
