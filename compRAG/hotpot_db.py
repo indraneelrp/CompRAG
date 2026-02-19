@@ -206,7 +206,7 @@ def get_processed_ids(conn):
     return set(row[0] for row in c.fetchall() if row[0])
 
 def process_dataset(split="validation", limit=None, chunk_size=500,
-                   batch_size=500, encoding_batch=128):
+                   encoding_batch=128):
     from tqdm import tqdm
     
     ds = load_dataset("hotpotqa/hotpot_qa", "fullwiki")[split]
@@ -224,79 +224,70 @@ def process_dataset(split="validation", limit=None, chunk_size=500,
         print("All examples already processed!")
         conn.close()
         return
-    
+
     print(f"Processing {len(to_process)}/{total} examples ({len(processed_ids)} already done)")
-    
-    all_results = []
+
     nlp = spacy.load("en_core_web_sm", disable=["ner", "textcat"])
 
-    # Stage 1: Sequential triplet extraction
+    # Combined pipeline: extract triplets and encode HRRs in mini-batches, then
+    # write to DB after each mini-batch. This ensures progress is checkpointed
+    # continuously so that a job restart resumes from the last committed batch
+    # rather than starting over from scratch.
+    #
     # ProcessPoolExecutor cannot be used here because REBEL is a CUDA model and
     # CUDA contexts cannot be safely forked into child processes.
-    print("Stage 1: Extracting triplets (sequential, REBEL)...")
-    from tqdm import tqdm as _tqdm
-    for ex in _tqdm(to_process, desc="Extracting triplets"):
-        try:
-            results = process_example_no_embeddings(ex, chunk_size, nlp)
-            all_results.extend(results)
-        except Exception as e:
-            print(f"Error processing {ex['id']}: {e}")
-    
-    # Stage 2: Batch encode HRRs (single-threaded but batched for model efficiency)
-    print(f"Stage 2: Encoding {len(all_results)} chunks in batches of {encoding_batch}...")
-    chunks_batch = []
-    triplets_batch = []
-    hrr_batch = []
-    
-    for i in tqdm(range(0, len(all_results), encoding_batch), desc="Encoding HRRs"):
-        batch = all_results[i:i+encoding_batch]
-        batch = batch_encode_hrrs(batch)
-        
-        # Prepare DB inserts
-        for result in batch:
-            chunk_id = result['chunk_id']
-            chunks_batch.append((chunk_id, result['title'], result['text']))
-            
-            for s, r, o in result['triplets']:
-                triplets_batch.append((chunk_id, s, r, o))
-            
-            for hrr_blob in result.get('hrr_vectors', []):
-                hrr_batch.append((chunk_id, hrr_blob))
-        
-        # Bulk DB write periodically
-        if len(chunks_batch) >= batch_size:
-            with conn:
-                conn.executemany("INSERT OR IGNORE INTO chunks (id, title, text) VALUES (?, ?, ?)", 
-                               chunks_batch)
-                conn.executemany("INSERT OR IGNORE INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", 
-                               triplets_batch)
-                conn.executemany("INSERT OR IGNORE INTO hrr_vectors (chunk_id, hrr_vector) VALUES (?, ?)", 
-                               hrr_batch)
-            conn.commit()
-            chunks_batch.clear()
-            triplets_batch.clear()
-            hrr_batch.clear()
-    
-    # Final write for remaining
-    if chunks_batch:
+    print(f"Extracting triplets and encoding HRRs ({encoding_batch} examples per checkpoint batch)...")
+
+    total_chunks = 0
+    for i in tqdm(range(0, len(to_process), encoding_batch), desc="Processing examples"):
+        example_batch = to_process[i:i + encoding_batch]
+
+        # Stage 1: extract triplets for this mini-batch
+        batch_results = []
+        for ex in example_batch:
+            try:
+                results = process_example_no_embeddings(ex, chunk_size, nlp)
+                batch_results.extend(results)
+            except Exception as e:
+                print(f"Error processing {ex['id']}: {e}")
+
+        if not batch_results:
+            continue
+
+        # Stage 2: encode HRRs for this mini-batch (batched GPU call)
+        batch_results = batch_encode_hrrs(batch_results)
+
+        # Write entire mini-batch to DB in one transaction, then commit.
+        # INSERT OR IGNORE means safe to re-run if the job is killed mid-batch.
+        chunks_rows   = [(r['chunk_id'], r['title'], r['text']) for r in batch_results]
+        triplet_rows  = [(r['chunk_id'], s, rel, o)
+                         for r in batch_results for s, rel, o in r['triplets']]
+        hrr_rows      = [(r['chunk_id'], blob)
+                         for r in batch_results for blob in r.get('hrr_vectors', [])]
+
         with conn:
-            conn.executemany("INSERT OR IGNORE INTO chunks (id, title, text) VALUES (?, ?, ?)", 
-                           chunks_batch)
-            conn.executemany("INSERT OR IGNORE INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)", 
-                           triplets_batch)
-            conn.executemany("INSERT OR IGNORE INTO hrr_vectors (chunk_id, hrr_vector) VALUES (?, ?)", 
-                           hrr_batch)
+            conn.executemany(
+                "INSERT OR IGNORE INTO chunks (id, title, text) VALUES (?, ?, ?)",
+                chunks_rows)
+            conn.executemany(
+                "INSERT OR IGNORE INTO triplets (chunk_id, subject, relation, object) VALUES (?, ?, ?, ?)",
+                triplet_rows)
+            conn.executemany(
+                "INSERT OR IGNORE INTO hrr_vectors (chunk_id, hrr_vector) VALUES (?, ?)",
+                hrr_rows)
         conn.commit()
-    
+
+        total_chunks += len(batch_results)
+
     conn.close()
-    print(f"Processing complete! Processed {len(all_results)} chunks total.")
+    print(f"Processing complete! Processed {total_chunks} chunks total.")
 
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         print("Testing with 10 examples, 300 char chunks...")
-        process_dataset(limit=10, chunk_size=300, batch_size=50, encoding_batch=32)
+        process_dataset(limit=10, chunk_size=300, encoding_batch=32)
     else:
-        # For full run, use larger batches
-        process_dataset(limit=None, chunk_size=500, batch_size=1000, encoding_batch=256)
+        # For full run, use larger batches for more efficient GPU utilisation
+        process_dataset(limit=None, chunk_size=500, encoding_batch=256)

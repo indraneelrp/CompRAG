@@ -3,13 +3,15 @@ Make triplets given chunks
 Uses Babelscape/rebel-large (a seq2seq model) to extract relation triplets.
 '''
 import re
+import torch
 import spacy
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from compRAG.text_samples import get_hardcoded_texts
 
-# Load REBEL model and tokenizer
+# Load REBEL model and tokenizer onto GPU if available
+_device = "cuda" if torch.cuda.is_available() else "cpu"
 _tokenizer = AutoTokenizer.from_pretrained("Babelscape/rebel-large")
-_model = AutoModelForSeq2SeqLM.from_pretrained("Babelscape/rebel-large")
+_model = AutoModelForSeq2SeqLM.from_pretrained("Babelscape/rebel-large").to(_device)
 
 
 def _parse_rebel_output(text):
@@ -65,36 +67,49 @@ def _extract_triplets_rebel(text):
 
     Splits the text into sentences before passing to REBEL, since the model
     was trained on sentence-level inputs and performs poorly on full paragraphs.
+    All sentences from a chunk are batched into a single generate() call so
+    the GPU processes them in parallel rather than one at a time.
     """
     # Strip markdown formatting that confuses REBEL (bold, italic, links)
     text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)   # **bold** / *italic*
     text = re.sub(r'\[(.*?)\](?:\(.*?\))?', r'\1', text)  # [text](url) or [text]
     # Normalize whitespace — embedded newlines cause REBEL to produce garbled tokens
     text = re.sub(r'\s+', ' ', text).strip()
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = [s for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+    if not sentences:
+        return []
+
+    # Tokenize all sentences at once and move to device
+    inputs = _tokenizer(
+        sentences,
+        max_length=512,
+        padding=True,
+        truncation=True,
+        return_tensors="pt",
+    ).to(_device)
+
+    # Single batched generate call: outputs shape = (len(sentences) * num_return_sequences, seq_len)
+    # i.e. [seq0_sent0, seq1_sent0, seq2_sent0, seq0_sent1, seq1_sent1, seq2_sent1, ...]
+    num_return_sequences = 3
+    outputs = _model.generate(
+        **inputs,
+        max_length=512,
+        num_beams=5,
+        num_return_sequences=num_return_sequences,
+    )
+
+    decoded_all = _tokenizer.batch_decode(outputs, skip_special_tokens=False)
+
     all_triplets = []
-    for sentence in sentences:
-        if not sentence.strip():
-            continue
-        inputs = _tokenizer(
-            sentence,
-            max_length=512,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-        )
-        outputs = _model.generate(
-            **inputs,
-            max_length=512,
-            num_beams=5,
-            num_return_sequences=3,
-        )
-        # Collect triplets from all returned sequences and merge
+    for sent_idx, sentence in enumerate(sentences):
+        sentence_lower = sentence.lower()
+        # Slice the 3 sequences that belong to this sentence
+        sent_decoded = decoded_all[sent_idx * num_return_sequences :
+                                   (sent_idx + 1) * num_return_sequences]
         triplets = []
-        for decoded in _tokenizer.batch_decode(outputs, skip_special_tokens=False):
+        for decoded in sent_decoded:
             triplets.extend(_parse_rebel_output(decoded))
         # Grounding check: drop hallucinations where neither entity appears in the source sentence
-        sentence_lower = sentence.lower()
         triplets = [
             (s, r, o) for s, r, o in triplets
             if s.lower() in sentence_lower or o.lower() in sentence_lower

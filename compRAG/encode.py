@@ -63,13 +63,14 @@ def doc_embeddings2hrr(doc_triplet_embeddings: list[list[list[Any]]])-> list[lis
     return doc_hrr_vectors
 
 def chunk_triplets2embeddings(chunk_triplets: list[tuple[str, str, str]])-> list[list[np.ndarray]]:
-    chunk_triplets_embed = []
-    for x,R,y in chunk_triplets:
-        embed_x = EMBEDDING_MODEL.encode([x])[0]
-        embed_R = EMBEDDING_MODEL.encode([R])[0]
-        embed_y = EMBEDDING_MODEL.encode([y])[0]
-        chunk_triplets_embed.append([embed_x, embed_R, embed_y])
-    return chunk_triplets_embed
+    if not chunk_triplets:
+        return []
+    # Encode all subjects, relations, and objects in 3 batched calls instead of 3*N individual calls
+    subjects, relations, objects = zip(*chunk_triplets)
+    subj_embeds = EMBEDDING_MODEL.encode(subjects,  batch_size=256, show_progress_bar=False)
+    rel_embeds  = EMBEDDING_MODEL.encode(relations, batch_size=256, show_progress_bar=False)
+    obj_embeds  = EMBEDDING_MODEL.encode(objects,   batch_size=256, show_progress_bar=False)
+    return [[subj_embeds[i], rel_embeds[i], obj_embeds[i]] for i in range(len(chunk_triplets))]
 
 def chunk_embeddings2hrr(chunk_triplet_embeddings: list[list[Any]])-> list[torch.Tensor]:
     chunk_hrr_vectors = []
