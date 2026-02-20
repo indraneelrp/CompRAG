@@ -5,11 +5,18 @@ Wood’s personality and compositions helped to catapult the group to the top of
 1990s Seattle music scene. Wood died only days before the scheduled release of the band’s debut album,
 'Apple', thus ending the group’s hopes of success."""
 
-text1 = '''**Eight names are** listed as authors on “Attention Is All You Need,” a scientific paper written in the spring of 2017. They were all [Google] researchers, though by then one had left the company. When the most tenured contributor, Noam Shazeer, saw an early draft, he was surprised that his name appeared first, suggesting his contribution was paramount. “I wasn’t thinking about it,” he says.
+text1 = '''**Eight names are** listed as authors on “Attention Is All You Need,” 
+a scientific paper written in the spring of 2017. They were all [Google] researchers, 
+though by then one had left the company. When the most tenured contributor, Noam Shazeer, 
+saw an early draft, he was surprised that his name appeared first, suggesting his contribution was paramount. 
+“I wasn’t thinking about it,” he says.
 '''
 
 text2 = '''
-It’s always a delicate balancing act to figure out how to list names—who gets the coveted lead position, who’s shunted to the rear. Especially in a case like this one, where each participant left a distinct mark in a true group effort. As the researchers hurried to finish their paper, they ultimately decided to “sabotage” the convention of ranking contributors. They added an asterisk to each name and a footnote: “Equal contributor,” it read. “Listing order is random.” The writers sent the paper off to a prestigious artificial intelligence conference just before the deadline—and kicked off a revolution.
+It’s always a delicate balancing act to figure out how to list names—who gets the coveted lead position, 
+who’s shunted to the rear. Especially in a case like this one, where each participant left a distinct mark i
+n a true group effort. As the researchers hurried to finish their paper, they ultimately decided to “sabotage” 
+the convention of ranking contributors. They added an asterisk to each name and a footnote: “Equal contributor,” it read. “Listing order is random.” The writers sent the paper off to a prestigious artificial intelligence conference just before the deadline—and kicked off a revolution.
 '''
 
 text3= '''

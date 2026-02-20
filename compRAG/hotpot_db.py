@@ -96,6 +96,7 @@ def chunk_text(text, chunk_size=500):
 
 def process_example_no_embeddings(example, chunk_size=500, nlp=None):
     """Extract triplets only - no embeddings yet"""
+    import time
     question_id = example['id']
     titles = example['context']['title']
     paragraphs = example['context']['sentences']
@@ -110,39 +111,53 @@ def process_example_no_embeddings(example, chunk_size=500, nlp=None):
         for chunk in chunks:
             chunk_id = f"{question_id}_chunk{chunk_counter}"
             chunk_counter += 1
+
+            start_time = time.time()
             triplets = main_generate_triplets(nlp, chunk)
-            
+            elapsed = time.time() - start_time
+
+            if elapsed > 10:  # Warn if REBEL takes > 10 seconds
+                print(f"    WARNING: REBEL took {elapsed:.1f}s for chunk {chunk_id}", flush=True)
+
             results.append({
                 'chunk_id': chunk_id,
                 'title': title,
                 'text': chunk,
                 'triplets': triplets
             })
-    
+
     return results
 
 def batch_encode_hrrs(results_batch):
     """Encode all triplets in batch"""
+    import time
     all_triplets = []
     chunk_map = []  # Track which chunk each triplet belongs to
-    
+
     for i, result in enumerate(results_batch):
         for triplet in result['triplets']:
             all_triplets.append(triplet)
             chunk_map.append(i)
-    
+
     if not all_triplets:
         return results_batch
-    
+
     # Single batched encoding call
     try:
+        start_time = time.time()
         all_embeddings = chunk_triplets2embeddings(all_triplets)
+        embed_time = time.time() - start_time
+        print(f"    Embedding {len(all_triplets)} triplets took {embed_time:.1f}s", flush=True)
+
+        start_time = time.time()
         all_hrrs = chunk_embeddings2hrr(all_embeddings)
-        
+        hrr_time = time.time() - start_time
+        print(f"    HRR encoding took {hrr_time:.1f}s", flush=True)
+
         # Distribute HRRs back to their chunks
         for result in results_batch:
             result['hrr_vectors'] = []
-        
+
         for hrr_vec, chunk_idx in zip(all_hrrs, chunk_map):
             if isinstance(hrr_vec, torch.Tensor):
                 hrr_vec = hrr_vec.cpu().numpy()
@@ -152,7 +167,7 @@ def batch_encode_hrrs(results_batch):
         print(f"Batch HRR error: {e}")
         for result in results_batch:
             result['hrr_vectors'] = []
-    
+
     return results_batch
 
 # def process_example(example, chunk_size=500):
@@ -241,13 +256,16 @@ def process_dataset(split="validation", limit=None, chunk_size=500,
     total_chunks = 0
     for i in tqdm(range(0, len(to_process), encoding_batch), desc="Processing examples"):
         example_batch = to_process[i:i + encoding_batch]
+        print(f"\n[Batch {i//encoding_batch + 1}/{(len(to_process)-1)//encoding_batch + 1}] Processing examples {i} to {i+len(example_batch)}")
 
         # Stage 1: extract triplets for this mini-batch
         batch_results = []
-        for ex in example_batch:
+        for j, ex in enumerate(example_batch):
             try:
+                print(f"  [{j+1}/{len(example_batch)}] Extracting triplets for {ex['id']}...", flush=True)
                 results = process_example_no_embeddings(ex, chunk_size, nlp)
                 batch_results.extend(results)
+                print(f"  [{j+1}/{len(example_batch)}] Got {len(results)} chunks", flush=True)
             except Exception as e:
                 print(f"Error processing {ex['id']}: {e}")
 
@@ -255,7 +273,9 @@ def process_dataset(split="validation", limit=None, chunk_size=500,
             continue
 
         # Stage 2: encode HRRs for this mini-batch (batched GPU call)
+        print(f"  Encoding HRRs for {len(batch_results)} chunks ({sum(len(r['triplets']) for r in batch_results)} triplets)...", flush=True)
         batch_results = batch_encode_hrrs(batch_results)
+        print(f"  HRR encoding complete", flush=True)
 
         # Write entire mini-batch to DB in one transaction, then commit.
         # INSERT OR IGNORE means safe to re-run if the job is killed mid-batch.
@@ -290,4 +310,5 @@ if __name__ == "__main__":
         process_dataset(limit=10, chunk_size=300, encoding_batch=32)
     else:
         # For full run, use larger batches for more efficient GPU utilisation
-        process_dataset(limit=None, chunk_size=500, encoding_batch=256)
+        # Reduce to 64 if you experience GPU OOM or extreme slowness
+        process_dataset(limit=None, chunk_size=500, encoding_batch=64)
